@@ -118,11 +118,11 @@ namespace ObsAgent
         {
             try
             {
+                Debug.Log( ConfigPath );
                 if( !File.Exists( ConfigPath ) )
                 {
                     return new ObsAgentConfiguration();
                 }
-
                 string json = File.ReadAllText(ConfigPath);
                 ObsAgentConfiguration config =
                     JsonUtility.FromJson<ObsAgentConfiguration>(json);
