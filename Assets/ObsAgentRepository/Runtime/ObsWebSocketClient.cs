@@ -1,5 +1,3 @@
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-
 using System;
 using System.IO;
 using System.Net.WebSockets;
@@ -421,5 +419,3 @@ namespace ObsAgent
         }
     }
 }
-
-#endif
