@@ -154,4 +154,80 @@ namespace ObsAgent
             File.WriteAllText( ConfigPath, json );
         }
     }
+
+    [Serializable]
+    public sealed class VideoSessionRequest
+    {
+        public string sessionId;
+    }
+
+    [Serializable]
+    public sealed class VideoSessionDescriptionRequest
+    {
+        public string sessionId;
+        public string type;
+        public string sdp;
+    }
+
+    [Serializable]
+    public sealed class VideoSessionDescriptionResponse
+    {
+        public bool success;
+        public string message;
+        public bool hasValue;
+
+        public string sessionId;
+        public string type;
+        public string sdp;
+
+        public string utcTime;
+
+        public static VideoSessionDescriptionResponse Empty( string sessionId, string type, string message )
+        {
+            return new VideoSessionDescriptionResponse
+            {
+                success = true,
+                message = message,
+                hasValue = false,
+
+                sessionId = sessionId,
+                type = type,
+                sdp = string.Empty,
+
+                utcTime = DateTime.UtcNow.ToString( "O" )
+            };
+        }
+
+        public static VideoSessionDescriptionResponse Value( string sessionId, string type, string sdp, string message )
+        {
+            return new VideoSessionDescriptionResponse
+            {
+                success = true,
+                message = message,
+                hasValue = true,
+
+                sessionId = sessionId,
+                type = type,
+                sdp = sdp,
+
+                utcTime = DateTime.UtcNow.ToString( "O" )
+            };
+        }
+
+        public static VideoSessionDescriptionResponse Error( string sessionId, string type, string message )
+        {
+            return new VideoSessionDescriptionResponse
+            {
+                success = false,
+                message = message,
+                hasValue = false,
+
+                sessionId = sessionId,
+                type = type,
+                sdp = string.Empty,
+
+                utcTime = DateTime.UtcNow.ToString( "O" )
+            };
+        }
+    }
 }

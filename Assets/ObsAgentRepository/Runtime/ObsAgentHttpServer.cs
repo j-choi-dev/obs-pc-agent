@@ -12,11 +12,12 @@ namespace ObsAgent
 {
     public sealed class ObsAgentHttpServer
     {
-        private const int MaxRequestBytes = 64 * 1024;
-        private const int MaxBodyBytes = 32 * 1024;
+        private const int MaxRequestBytes = 384 * 1024;
+        private const int MaxBodyBytes = 256 * 1024;
 
         private readonly Func<ObsAgentConfiguration> _configProvider;
         private readonly ObsAgentOperations _operations;
+        private readonly ObsVideoSessionStore _videoSessionStore;
         private readonly Action<string> _log;
 
         private TcpListener _listener;
@@ -28,10 +29,11 @@ namespace ObsAgent
             _cancellation != null &&
             !_cancellation.IsCancellationRequested;
 
-        public ObsAgentHttpServer( Func<ObsAgentConfiguration> configProvider, ObsAgentOperations operations, Action<string> log )
+        public ObsAgentHttpServer( Func<ObsAgentConfiguration> configProvider, ObsAgentOperations operations, ObsVideoSessionStore videoSessionStore, Action<string> log )
         {
             _configProvider = configProvider;
             _operations = operations;
+            _videoSessionStore = videoSessionStore;
             _log = log ?? ( _ => { } );
         }
 
@@ -131,7 +133,9 @@ namespace ObsAgent
 
                     using( NetworkStream stream = client.GetStream() )
                     {
-                        HttpRequestData request = await ReadRequestAsync( stream, cancellationToken);
+                        HttpRequestData request = await ReadRequestAsync( stream, cancellationToken );
+                        IPEndPoint remoteEndPoint = client.Client.RemoteEndPoint as IPEndPoint;
+                        request.RemoteAddress = remoteEndPoint?.Address;
                         await RouteAsync( request, stream, cancellationToken );
                     }
                 }
@@ -161,10 +165,9 @@ namespace ObsAgent
         private async Task RouteAsync( HttpRequestData request, NetworkStream stream, CancellationToken cancellationToken )
         {
             string path = NormalizePath(request.Path);
-
             if( request.Method == "OPTIONS" )
             {
-                await WriteEmptyAsync( stream, 204, cancellationToken );
+                //await WriteEmptyAsync( stream, 204, cancellationToken );
                 return;
             }
 
@@ -173,58 +176,145 @@ namespace ObsAgent
                 await WriteJsonAsync( stream, 200, AgentApiResponse.Ok( "OBS Agent가 실행 중입니다.", _operations.IsObsRunning() ), cancellationToken );
                 return;
             }
+            if( request.Method == "GET" && path == "/video/receiver" )
+            {
+                if( !IsLoopbackRequest( request ) )
+                {
+                    await WriteJsonAsync( stream, 403, AgentApiResponse.Error( "Receiver 페이지는 PC 로컬에서만 접근할 수 있습니다.", _operations.IsObsRunning() ), cancellationToken );
+                    return;
+                }
+
+                try
+                {
+                    string sessionId = GetRequiredQueryParameter( request.Path, "sessionId" );
+                    ObsAgentConfiguration config = _configProvider().Clone();
+
+                    string html = ObsBrowserReceiverPage.Build( sessionId, config.agentToken );
+                    await WriteTextAsync( stream, 200, "text/html; charset=utf-8", html, cancellationToken );
+                    return;
+                }
+                catch( InvalidOperationException exception )
+                {
+                    await WriteJsonAsync( stream, 400, AgentApiResponse.Error( exception.Message, _operations.IsObsRunning() ), cancellationToken );
+                    return;
+                }
+            }
 
             if( !IsAuthorized( request ) )
             {
-                await WriteJsonAsync( stream, 401, AgentApiResponse.Error( "Authorization Bearer Token이 올바르지 않습니다.", _operations.IsObsRunning() ),cancellationToken );
+                await WriteJsonAsync( stream, 401, AgentApiResponse.Error( "Authorization Bearer Token이 올바르지 않습니다.", _operations.IsObsRunning() ), cancellationToken );
                 return;
             }
 
-            if( request.Method != "POST" )
+            try
             {
-                await WriteJsonAsync( stream, 405, AgentApiResponse.Error( "지원하지 않는 HTTP Method입니다.", _operations.IsObsRunning() ), cancellationToken );
-                return;
-            }
+                if( request.Method == "POST" && path == "/api/video/session/reset" )
+                {
+                    VideoSessionRequest body = ParseJsonBody<VideoSessionRequest>( request.Body );
+                    string sessionId = ObsVideoSessionStore.NormalizeSessionId( body.sessionId );
+                    _videoSessionStore.Reset( sessionId );
+                    _log( $"WebRTC 세션 초기화: {sessionId}" );
 
-            AgentApiResponse response;
-
-            switch( path )
-            {
-                case "/api/obs/launch":
-                    response = await _operations.LaunchObsAsync( cancellationToken );
-                    break;
-
-                case "/api/obs/test":
-                    response = await _operations.TestConnectionAsync( cancellationToken );
-                    break;
-
-                case "/api/obs/record/start":
-                    response = await _operations.StartRecordAsync( cancellationToken );
-                    break;
-
-                case "/api/obs/record/stop":
-                    response = await _operations.StopRecordAsync( cancellationToken );
-                    break;
-
-                case "/api/obs/stream/start":
-                    response = await _operations.StartStreamAsync( cancellationToken );
-                    break;
-
-                case "/api/obs/stream/stop":
-                    response = await _operations.StopStreamAsync( cancellationToken );
-                    break;
-
-                case "/api/obs/scene":
-                    SceneCommandRequest command = ParseSceneCommand(request.Body);
-                    response = await _operations.SetSceneAsync( command.sceneName, cancellationToken );
-                    break;
-
-                default:
-                    await WriteJsonAsync( stream, 404,AgentApiResponse.Error( "API 경로를 찾을 수 없습니다.", _operations.IsObsRunning() ), cancellationToken );
-
+                    await WriteJsonAsync( stream, 200, AgentApiResponse.Ok( "WebRTC 영상 세션을 초기화했습니다.", _operations.IsObsRunning() ), cancellationToken );
                     return;
+                }
+
+                if( request.Method == "POST" && path == "/api/video/offer" )
+                {
+                    VideoSessionDescriptionRequest body = ParseJsonBody< VideoSessionDescriptionRequest>( request.Body );
+                    RequireDescriptionType( body.type, "offer" );
+                    string sessionId = ObsVideoSessionStore.NormalizeSessionId( body.sessionId );
+
+                    _videoSessionStore.SetOffer( sessionId, body.sdp );
+                    _log( $"WebRTC Offer 등록: {sessionId}" );
+
+                    await WriteJsonAsync( stream, 200, AgentApiResponse.Ok( "WebRTC Offer를 등록했습니다.", _operations.IsObsRunning() ), cancellationToken );
+                    return;
+                }
+
+                if( request.Method == "GET" && path == "/api/video/offer" )
+                {
+                    string sessionId = GetRequiredQueryParameter( request.Path, "sessionId" );
+                    sessionId = ObsVideoSessionStore .NormalizeSessionId( sessionId );
+                    ObsVideoSessionStore.VideoSessionValue value = _videoSessionStore.GetOffer( sessionId );
+                    VideoSessionDescriptionResponse response = value.HasValue 
+                        ? VideoSessionDescriptionResponse.Value( sessionId, "offer", value.Sdp, "Offer가 준비되었습니다." ) 
+                        : VideoSessionDescriptionResponse .Empty( sessionId, "offer", "아직 Offer가 없습니다." );
+                    await WriteJsonAsync( stream, 200, response, cancellationToken );
+                    return;
+                }
+                if( request.Method == "POST" && path == "/api/video/answer" )
+                {
+                    VideoSessionDescriptionRequest body = ParseJsonBody< VideoSessionDescriptionRequest>( request.Body );
+                    RequireDescriptionType( body.type, "answer" );
+                    string sessionId = ObsVideoSessionStore.NormalizeSessionId( body.sessionId );
+
+                    _videoSessionStore.SetAnswer( sessionId, body.sdp );
+                    _log( $"WebRTC Answer 등록: {sessionId}" );
+
+                    await WriteJsonAsync( stream, 200, AgentApiResponse.Ok( "WebRTC Answer를 등록했습니다.", _operations.IsObsRunning() ),cancellationToken );
+                    return;
+                }
+                if( request.Method == "GET" && path == "/api/video/answer" )
+                {
+                    string sessionId = GetRequiredQueryParameter( request.Path, "sessionId" );
+                    sessionId = ObsVideoSessionStore.NormalizeSessionId( sessionId );
+                    ObsVideoSessionStore.VideoSessionValue value = _videoSessionStore.GetAnswer( sessionId );
+                    VideoSessionDescriptionResponse response = value.HasValue 
+                        ? VideoSessionDescriptionResponse.Value( sessionId, "answer", value.Sdp, "Answer가 준비되었습니다." )
+                        : VideoSessionDescriptionResponse .Empty( sessionId, "answer", "아직 Answer가 없습니다." );
+                    await WriteJsonAsync( stream, 200, response, cancellationToken );
+                    return;
+                }
+
+                if( request.Method == "POST" )
+                {
+                    AgentApiResponse response = null;
+                    switch( path )
+                    {
+                        case "/api/obs/launch":
+                            response = await _operations.LaunchObsAsync( cancellationToken );
+                            break;
+
+                        case "/api/obs/test":
+                            response = await _operations.TestConnectionAsync( cancellationToken );
+                            break;
+
+                        case "/api/obs/record/start":
+                            response = await _operations.StartRecordAsync( cancellationToken );
+                            break;
+
+                        case "/api/obs/record/stop":
+                            response = await _operations.StopRecordAsync( cancellationToken );
+                            break;
+
+                        case "/api/obs/stream/start":
+                            response = await _operations.StartStreamAsync( cancellationToken );
+                            break;
+
+                        case "/api/obs/stream/stop":
+                            response = await _operations.StopStreamAsync( cancellationToken );
+                            break;
+                    }
+
+
+                    if( response != null )
+                    {
+                        await WriteJsonAsync( stream, response.success ? 200 : 500, response, cancellationToken );
+                        return;
+                    }
+                }
+                if( IsKnownApiPath( path ) )
+                {
+                    await WriteJsonAsync( stream, 405, AgentApiResponse.Error( "해당 API에서 지원하지 않는 HTTP Method입니다.", _operations.IsObsRunning() ), cancellationToken );
+                    return;
+                }
+                await WriteJsonAsync( stream, 404, AgentApiResponse.Error( "API 경로를 찾을 수 없습니다.", _operations.IsObsRunning() ), cancellationToken );
             }
-            await WriteJsonAsync( stream, response.success ? 200 : 500, response, cancellationToken );
+            catch( InvalidOperationException exception )
+            {
+                await WriteJsonAsync( stream, 400, AgentApiResponse.Error( exception.Message, _operations.IsObsRunning() ), cancellationToken );
+            }
         }
 
         private bool IsAuthorized( HttpRequestData request )
@@ -397,38 +487,35 @@ namespace ObsAgent
 
             return -1;
         }
-
-        private static async Task WriteJsonAsync( NetworkStream stream, int statusCode, AgentApiResponse response, CancellationToken cancellationToken )
+        private static async Task WriteJsonAsync<T>( NetworkStream stream, int statusCode, T response, CancellationToken cancellationToken )
         {
             string json = JsonUtility.ToJson(response);
-            byte[] body = Encoding.UTF8.GetBytes(json);
 
-            string headers = $"HTTP/1.1 {statusCode} {GetStatusText(statusCode)}\r\n" +
-                "Content-Type: application/json; charset=utf-8\r\n" +
+            await WriteTextAsync( stream, statusCode, "application/json; charset=utf-8", json, cancellationToken );
+        }
+
+        private static async Task WriteTextAsync( NetworkStream stream, int statusCode, string contentType, string text, CancellationToken cancellationToken )
+        {
+            byte[] body = Encoding.UTF8.GetBytes( text ?? string.Empty );
+
+            string headers = $"HTTP/1.1 {statusCode} " + 
+                $"{GetStatusText(statusCode)}\r\n" + 
+                $"Content-Type: {contentType}\r\n" +
                 $"Content-Length: {body.Length}\r\n" +
                 "Connection: close\r\n" +
                 "Cache-Control: no-store\r\n" +
                 "Access-Control-Allow-Origin: *\r\n" +
-                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-                "Access-Control-Allow-Headers: Authorization, Content-Type\r\n" +
+                "Access-Control-Allow-Methods: " +
+                "GET, POST, OPTIONS\r\n" +
+                "Access-Control-Allow-Headers: " +
+                "Authorization, Content-Type\r\n" +
+                "X-Content-Type-Options: nosniff\r\n" +
                 "\r\n";
-            byte[] headerBytes = Encoding.ASCII.GetBytes(headers);
+
+            byte[] headerBytes = Encoding.ASCII.GetBytes( headers );
+
             await stream.WriteAsync( headerBytes, 0, headerBytes.Length, cancellationToken );
             await stream.WriteAsync( body, 0, body.Length, cancellationToken );
-        }
-
-        private static async Task WriteEmptyAsync( NetworkStream stream, int statusCode, CancellationToken cancellationToken )
-        {
-            string headers = $"HTTP/1.1 {statusCode} {GetStatusText(statusCode)}\r\n" +
-                "Content-Length: 0\r\n" +
-                "Connection: close\r\n" +
-                "Access-Control-Allow-Origin: *\r\n" +
-                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-                "Access-Control-Allow-Headers: Authorization, Content-Type\r\n" +
-                "\r\n";
-
-            byte[] bytes = Encoding.ASCII.GetBytes(headers);
-            await stream.WriteAsync( bytes, 0, bytes.Length, cancellationToken );
         }
 
         private static string NormalizePath( string path )
@@ -438,9 +525,12 @@ namespace ObsAgent
                 return "/";
             }
             int queryIndex = path.IndexOf('?');
-            return queryIndex >= 0
-                ? path.Substring( 0, queryIndex )
-                : path;
+            string result = queryIndex >= 0 ? path.Substring( 0, queryIndex ) : path;
+            if( result.Length > 1 )
+            {
+                result = result.TrimEnd( '/' );
+            }
+            return result.ToLowerInvariant();
         }
 
         private static string GetStatusText( int statusCode )
@@ -455,6 +545,8 @@ namespace ObsAgent
                     return "Bad Request";
                 case 401:
                     return "Unauthorized";
+                case 403:
+                    return "Forbidden";
                 case 404:
                     return "Not Found";
                 case 405:
@@ -491,12 +583,124 @@ namespace ObsAgent
             return difference == 0;
         }
 
+        private static void RequireDescriptionType( string actualType, string expectedType )
+        {
+            if( !string.Equals( actualType, expectedType, StringComparison.OrdinalIgnoreCase ) )
+            {
+                throw new InvalidOperationException( $"SDP type은 '{expectedType}'이어야 합니다." );
+            }
+        }
+
+        private static string GetRequiredQueryParameter( string rawPath, string parameterName )
+        {
+            if( string.IsNullOrWhiteSpace( rawPath ) )
+            {
+                throw new InvalidOperationException( $"{parameterName} Query Parameter가 없습니다." );
+            }
+
+            int queryIndex = rawPath.IndexOf('?');
+
+            if( queryIndex < 0 || queryIndex >= rawPath.Length - 1 )
+            {
+                throw new InvalidOperationException( $"{parameterName} Query Parameter가 없습니다." );
+            }
+
+            string query = rawPath.Substring( queryIndex + 1 );
+
+            string[] pairs = query.Split('&');
+
+            foreach( string pair in pairs )
+            {
+                if( string.IsNullOrWhiteSpace( pair ) )
+                {
+                    continue;
+                }
+
+                int separatorIndex = pair.IndexOf('=');
+                string encodedName = separatorIndex >= 0
+                    ? pair.Substring( 0, separatorIndex )
+                    : pair;
+
+                string encodedValue = separatorIndex >= 0 
+                    ? pair.Substring( separatorIndex + 1 ) 
+                    : string.Empty;
+
+                string name = WebUtility.UrlDecode( encodedName );
+                if( !string.Equals( name, parameterName, StringComparison.Ordinal ) )
+                {
+                    continue;
+                }
+
+                string value = WebUtility.UrlDecode( encodedValue );
+                if( string.IsNullOrWhiteSpace( value ) )
+                {
+                    throw new InvalidOperationException( $"{parameterName} 값이 비어 있습니다." );
+                }
+                return value;
+            }
+            throw new InvalidOperationException( $"{parameterName} Query Parameter가 없습니다." );
+        }
+
+        private static T ParseJsonBody<T>( string body ) where T : class
+        {
+            if( string.IsNullOrWhiteSpace( body ) )
+            {
+                throw new InvalidOperationException( "요청 JSON 본문이 비어 있습니다." );
+            }
+
+            try
+            {
+                T result = JsonUtility.FromJson<T>( body );
+
+                if( result == null )
+                {
+                    throw new InvalidOperationException( "요청 JSON을 해석하지 못했습니다." );
+                }
+
+                return result;
+            }
+            catch( InvalidOperationException )
+            {
+                throw;
+            }
+            catch( Exception exception )
+            {
+                throw new InvalidOperationException( "요청 JSON 형식이 올바르지 않습니다.", exception );
+            }
+        }
+
+        private static bool IsLoopbackRequest( HttpRequestData request )
+        {
+            return request.RemoteAddress != null && IPAddress.IsLoopback( request.RemoteAddress );
+        }
+
+        private static bool IsKnownApiPath( string path )
+        {
+            switch( path )
+            {
+                case "/api/video/session/reset":
+                case "/api/video/offer":
+                case "/api/video/answer":
+                case "/api/obs/launch":
+                case "/api/obs/test":
+                case "/api/obs/record/start":
+                case "/api/obs/record/stop":
+                case "/api/obs/stream/start":
+                case "/api/obs/stream/stop":
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
         private sealed class HttpRequestData
         {
             public string Method;
             public string Path;
             public string Body;
             public Dictionary<string, string> Headers;
+            public IPAddress RemoteAddress;
         }
     }
 }
