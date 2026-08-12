@@ -146,7 +146,6 @@ namespace ObsAgent
                 catch( Exception exception )
                 {
                     _log( $"HTTP 요청 처리 실패: {exception.Message}" );
-
                     try
                     {
                         using( NetworkStream stream = client.GetStream() )
@@ -167,7 +166,7 @@ namespace ObsAgent
             string path = NormalizePath(request.Path);
             if( request.Method == "OPTIONS" )
             {
-                //await WriteEmptyAsync( stream, 204, cancellationToken );
+                await WriteTextAsync( stream, 204, "text/plain; charset=utf-8", string.Empty, cancellationToken  );
                 return;
             }
 
@@ -226,7 +225,7 @@ namespace ObsAgent
                     string sessionId = ObsVideoSessionStore.NormalizeSessionId( body.sessionId );
 
                     _videoSessionStore.SetOffer( sessionId, body.sdp );
-                    _log( $"WebRTC Offer 등록: {sessionId}" );
+                    _log( $"WebRTC Offer 등록: {sessionId}, SdpLength={body.sdp?.Length ?? 0}" );
 
                     await WriteJsonAsync( stream, 200, AgentApiResponse.Ok( "WebRTC Offer를 등록했습니다.", _operations.IsObsRunning() ), cancellationToken );
                     return;
