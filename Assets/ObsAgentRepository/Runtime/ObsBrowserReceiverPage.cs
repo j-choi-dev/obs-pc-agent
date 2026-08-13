@@ -75,46 +75,32 @@ namespace ObsAgent
         {
             width: 100%;
             height: 100%;
-
             margin: 0;
             padding: 0;
-
             overflow: hidden;
-
             background: transparent;
         }
 
         #receiver-video
         {
             display: block;
-
             width: 100%;
             height: 100%;
-
             object-fit: contain;
-
             background: transparent;
         }
 
         #status
         {
             position: fixed;
-
             left: 12px;
             top: 12px;
-
             padding: 8px 10px;
-
             color: white;
-
-            background:
-                rgba(0, 0, 0, 0.72);
-
+            background: rgba(0, 0, 0, 0.72);
             font-family: sans-serif;
             font-size: 14px;
-
             white-space: pre-wrap;
-
             pointer-events: none;
         }
     </style>
@@ -136,118 +122,51 @@ namespace ObsAgent
 
 
     <script>
-
         'use strict';
-
-
-        const sessionId =
-            __SESSION_ID__;
-
-        const agentToken =
-            __AGENT_TOKEN__;
-
-
-        const pollIntervalMilliseconds =
-            250;
-
-
-        const videoElement =
-            document.getElementById(
-                'receiver-video');
-
-        const statusElement =
-            document.getElementById(
-                'status');
-
-
+        const sessionId = __SESSION_ID__;
+        const agentToken = __AGENT_TOKEN__;
+        const pollIntervalMilliseconds = 250;
+        const videoElement = document.getElementById( 'receiver-video');
+        const statusElement = document.getElementById( 'status');
         let peerConnection = null;
-
         let activeOfferSdp = '';
-
         let isStopped = false;
 
-
-
-        function setStatus(
-            message,
-            hide)
+        function setStatus( message, hide)
         {
-            statusElement.textContent =
-                message;
-
-            statusElement.style.display =
-                hide
-                    ? 'none'
-                    : 'block';
+            statusElement.textContent = message;
+            statusElement.style.display = hide ? 'none' : 'block';
         }
-
-
 
         function sleep(milliseconds)
         {
-            return new Promise(
-                resolve =>
-                    setTimeout(
-                        resolve,
-                        milliseconds));
+            return new Promise( resolve => setTimeout( resolve, milliseconds));
         }
 
-
-
-        async function callApi(
-            path,
-            options)
+        async function callApi( path, options )
         {
             options = options || {};
-
-            const headers =
-                new Headers(
-                    options.headers || {});
-
-            headers.set(
-                'Authorization',
-                'Bearer ' + agentToken);
-
-
+            const headers = new Headers( options.headers || {});
+            headers.set( 'Authorization', 'Bearer ' + agentToken);
             if (options.body)
             {
-                headers.set(
-                    'Content-Type',
-                    'application/json');
+                headers.set( 'Content-Type', 'application/json');
             }
-
-
-            const response =
-                await fetch(
-                    path,
+            const response = await fetch( path,
                     {
-                        method:
-                            options.method || 'GET',
-
+                        method: options.method || 'GET',
                         headers: headers,
-
-                        body:
-                            options.body || null,
-
-                        cache:
-                            'no-store'
+                        body: options.body || null,
+                        cache: 'no-store'
                     });
 
-
-            const responseText =
-                await response.text();
-
-
+            const responseText = await response.text();
             let responseData = null;
-
-
             if (responseText)
             {
                 try
                 {
-                    responseData =
-                        JSON.parse(
-                            responseText);
+                    responseData = JSON.parse( responseText );
                 }
                 catch
                 {
@@ -255,67 +174,38 @@ namespace ObsAgent
                 }
             }
 
-
             if (!response.ok)
             {
-                let detail =
-                    response.statusText;
-
-                if (responseData &&
-                    responseData.message)
+                let detail = response.statusText;
+                if (responseData && responseData.message)
                 {
-                    detail =
-                        responseData.message;
+                    detail = responseData.message;
                 }
                 else if (responseText)
                 {
-                    detail =
-                        responseText;
+                    detail = responseText;
                 }
 
-                throw new Error(
-                    'HTTP ' +
-                    response.status +
-                    ': ' +
-                    detail);
+                throw new Error( 'HTTP ' + response.status + ': ' + detail );
             }
 
-
-            if (responseData &&
-                responseData.success === false)
+            if (responseData && responseData.success === false)
             {
-                throw new Error(
-                    responseData.message ||
-                    'Agent API 실패');
+                throw new Error( responseData.message || 'Agent API 실패');
             }
-
-
             return responseData;
         }
 
-
-
         function closePeerConnection()
         {
-            const closingPeer =
-                peerConnection;
-
+            const closingPeer = peerConnection;
             peerConnection = null;
-
 
             if (closingPeer)
             {
-                closingPeer.ontrack =
-                    null;
-
-                closingPeer
-                    .onconnectionstatechange =
-                        null;
-
-                closingPeer
-                    .oniceconnectionstatechange =
-                        null;
-
+                closingPeer.ontrack = null;
+                closingPeer.onconnectionstatechange = null;
+                closingPeer.oniceconnectionstatechange = null;
                 try
                 {
                     closingPeer.close();
@@ -324,380 +214,164 @@ namespace ObsAgent
                 {
                 }
             }
-
-
-            videoElement.srcObject =
-                null;
+            videoElement.srcObject = null;
         }
 
-
-
-        function waitForIceGatheringComplete(
-            peer,
-            timeoutMilliseconds)
+        function waitForIceGatheringComplete( peer, timeoutMilliseconds)
         {
-            timeoutMilliseconds =
-                timeoutMilliseconds || 10000;
-
-
-            if (peer.iceGatheringState ===
-                'complete')
+            timeoutMilliseconds = timeoutMilliseconds || 10000;
+            if (peer.iceGatheringState === 'complete')
             {
                 return Promise.resolve();
             }
-
-
-            return new Promise(
-                (resolve, reject) =>
-                {
-                    const timeout =
-                        setTimeout(
-                            () =>
+            return new Promise( (resolve, reject) => {
+                    const timeout = setTimeout( () =>
                             {
                                 cleanup();
-
-                                reject(
-                                    new Error(
-                                        'Browser ICE Gathering 시간 초과'));
+                                reject( new Error( 'Browser ICE Gathering 시간 초과'));
                             },
                             timeoutMilliseconds);
 
 
                     function cleanup()
                     {
-                        clearTimeout(
-                            timeout);
-
-                        peer.removeEventListener(
-                            'icegatheringstatechange',
-                            onStateChanged);
+                        clearTimeout( timeout);
+                        peer.removeEventListener( 'icegatheringstatechange', onStateChanged);
                     }
 
 
                     function onStateChanged()
                     {
-                        if (
-                            peer.iceGatheringState !==
-                            'complete')
+                        if ( peer.iceGatheringState !== 'complete')
                         {
                             return;
                         }
-
                         cleanup();
-
                         resolve();
                     }
-
-
-                    peer.addEventListener(
-                        'icegatheringstatechange',
-                        onStateChanged);
+                    peer.addEventListener( 'icegatheringstatechange', onStateChanged);
                 });
         }
 
-
-
-        async function processOffer(
-            offerResponse)
+        async function processOffer( offerResponse)
         {
-            if (!offerResponse ||
-                !offerResponse.hasValue ||
-                !offerResponse.sdp)
+            if (!offerResponse || !offerResponse.hasValue || !offerResponse.sdp)
             {
                 return;
             }
-
-
-            if (offerResponse.sdp ===
-                    activeOfferSdp &&
-                peerConnection)
+            if (offerResponse.sdp === activeOfferSdp && peerConnection)
             {
                 return;
             }
-
-
-            activeOfferSdp =
-                offerResponse.sdp;
-
-
+            activeOfferSdp = offerResponse.sdp;
             closePeerConnection();
+            setStatus( 'iPhone Offer 적용 중', false);
 
-
-            setStatus(
-                'iPhone Offer 적용 중',
-                false);
-
-
-            const nextPeer =
-                new RTCPeerConnection(
+            const nextPeer = new RTCPeerConnection(
                     {
                         iceServers: []
                     });
 
-
-            peerConnection =
-                nextPeer;
-
-
-
-            nextPeer.ontrack =
-                event =>
-                {
+            peerConnection = nextPeer;
+            nextPeer.ontrack = event => {
                     let stream = null;
-
-
-                    if (event.streams &&
-                        event.streams.length > 0)
+                    if (event.streams && event.streams.length > 0)
                     {
-                        stream =
-                            event.streams[0];
+                        stream = event.streams[0];
                     }
                     else
                     {
-                        stream =
-                            new MediaStream(
-                                [
-                                    event.track
-                                ]);
+                        stream = new MediaStream( [ event.track ]);
                     }
-
-
-                    videoElement.srcObject =
-                        stream;
-
-
-                    videoElement
-                        .play()
-                        .catch(
-                            error =>
-                            {
-                                setStatus(
-                                    'Video 재생 실패\n' +
-                                    error.message,
-                                    false);
-                            });
+                    videoElement.srcObject = stream;
+                    videoElement.play()
+                        .catch( error => { setStatus( 'Video 재생 실패\n' + error.message, false); });
                 };
 
 
 
-            nextPeer
-                .oniceconnectionstatechange =
-                () =>
-                {
-                    const state =
-                        nextPeer
-                            .iceConnectionState;
-
-
+            nextPeer.oniceconnectionstatechange = () => {
+                    const state = nextPeer.iceConnectionState;
                     if (state === 'failed')
                     {
-                        setStatus(
-                            'ICE 연결 실패',
-                            false);
+                        setStatus( 'ICE 연결 실패', false);
                     }
                 };
 
-
-
-            nextPeer
-                .onconnectionstatechange =
-                () =>
-                {
-                    if (peerConnection !==
-                        nextPeer)
+            nextPeer.onconnectionstatechange = () => {
+                    if (peerConnection !== nextPeer)
                     {
                         return;
                     }
-
-
-                    const state =
-                        nextPeer
-                            .connectionState;
-
-
-                    if (state ===
-                        'connected')
+                    const state = nextPeer.connectionState;
+                    if (state === 'connected')
                     {
-                        setStatus(
-                            'WebRTC 연결됨',
-                            true);
-
+                        setStatus( 'WebRTC 연결됨', true);
                         return;
                     }
 
-
-                    if (state ===
-                            'failed' ||
-                        state ===
-                            'closed')
+                    if (state === 'failed' || state === 'closed')
                     {
-                        setStatus(
-                            'WebRTC 연결 상태: ' +
-                            state,
-                            false);
-
-                        activeOfferSdp =
-                            '';
-
+                        setStatus( 'WebRTC 연결 상태: ' + state, false);
+                        activeOfferSdp = '';
                         closePeerConnection();
-
                         return;
                     }
 
-
-                    if (state ===
-                        'disconnected')
+                    if (state === 'disconnected')
                     {
-                        setStatus(
-                            'WebRTC 연결이 일시적으로 끊어졌습니다.',
-                            false);
-
+                        setStatus( 'WebRTC 연결이 일시적으로 끊어졌습니다.', false);
                         return;
                     }
-
-
-                    setStatus(
-                        'WebRTC 연결 상태: ' +
-                        state,
-                        false);
+                    setStatus( 'WebRTC 연결 상태: ' + state, false);
                 };
 
+            await nextPeer.setRemoteDescription( { type: 'offer', sdp: offerResponse.sdp });
+            const answer = await nextPeer.createAnswer();
 
-
-            await nextPeer
-                .setRemoteDescription(
-                    {
-                        type: 'offer',
-
-                        sdp:
-                            offerResponse.sdp
-                    });
-
-
-
-            const answer =
-                await nextPeer
-                    .createAnswer();
-
-
-
-            await nextPeer
-                .setLocalDescription(
-                    answer);
-
-
-
-            await waitForIceGatheringComplete(
-                nextPeer);
-
-
-
-            if (!nextPeer.localDescription ||
-                !nextPeer.localDescription.sdp)
+            await nextPeer.setLocalDescription( answer);
+            await waitForIceGatheringComplete( nextPeer);
+            if (!nextPeer.localDescription || !nextPeer.localDescription.sdp)
             {
-                throw new Error(
-                    'Browser Local SDP Answer가 없습니다.');
+                throw new Error( 'Browser Local SDP Answer가 없습니다.');
             }
 
-
-
-            await callApi(
-                '/api/video/answer',
+            await callApi( '/api/video/answer',
                 {
                     method: 'POST',
-
-                    body:
-                        JSON.stringify(
+                    body: JSON.stringify(
                             {
-                                sessionId:
-                                    sessionId,
-
-                                type:
-                                    'answer',
-
-                                sdp:
-                                    nextPeer
-                                        .localDescription
-                                        .sdp
+                                sessionId: sessionId,
+                                type: 'answer',
+                                sdp: nextPeer.localDescription .sdp
                             })
                 });
-
-
-
-            setStatus(
-                'Answer 등록 완료, Peer 연결 대기 중',
-                false);
+            setStatus( 'Answer 등록 완료, Peer 연결 대기 중', false);
         }
-
-
 
         async function pollOfferLoop()
         {
-            setStatus(
-                'Offer 대기 중\nSession: ' +
-                sessionId,
-                false);
-
-
+            setStatus( 'Offer 대기 중\nSession: ' + sessionId, false);
             while (!isStopped)
             {
                 try
                 {
-                    const encodedSessionId =
-                        encodeURIComponent(
-                            sessionId);
-
-
-                    const offerResponse =
-                        await callApi(
-                            '/api/video/offer' +
-                            '?sessionId=' +
-                            encodedSessionId,
-                            {
-                                method: 'GET'
-                            });
-
-
-                    await processOffer(
-                        offerResponse);
-
-
-                    await sleep(
-                        pollIntervalMilliseconds);
+                    const encodedSessionId = encodeURIComponent( sessionId);
+                    const offerResponse = await callApi( '/api/video/offer' + '?sessionId=' + encodedSessionId, { method: 'GET' });
+                    await processOffer( offerResponse);
+                    await sleep( pollIntervalMilliseconds);
                 }
                 catch (error)
                 {
-                    setStatus(
-                        'Receiver 오류\n' +
-                        error.message,
-                        false);
-
-
-                    await sleep(
-                        1000);
+                    setStatus('Receiver 오류\n' +error.message, false);
+                    await sleep( 1000);
                 }
             }
         }
-
-
-
-        window.addEventListener(
-            'beforeunload',
-            () =>
-            {
-                isStopped = true;
-
-                closePeerConnection();
-            });
-
-
-
+        window.addEventListener( 'beforeunload', () => { isStopped = true; closePeerConnection(); });
         pollOfferLoop();
-
     </script>
-
 </body>
-
 </html>";
     }
 }
