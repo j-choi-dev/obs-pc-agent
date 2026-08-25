@@ -14,8 +14,7 @@ namespace ObsAgent
         public string agentToken = string.Empty;
 
         [Header("OBS Process")]
-        public string obsExecutablePath =
-            @"C:\Program Files\obs-studio\bin\64bit\obs64.exe";
+        public string obsExecutablePath = @"C:\Program Files\obs-studio\bin\64bit\obs64.exe";
 
         public string profileName = string.Empty;
         public string sceneCollectionName = string.Empty;
@@ -30,6 +29,15 @@ namespace ObsAgent
         public bool setSceneAfterLaunch = true;
         public bool startRecordingAfterLaunch;
         public bool startStreamingAfterLaunch;
+
+        [Header("YouTube")]
+        public string youtubeOAuthClientId = string.Empty;
+        public string youtubeOAuthClientSecret = string.Empty;
+
+        public string youtubeObsSceneName = "YouTubeLive";
+        public string youtubeObsSourceName = "OBS Receiver";
+
+        public string youtubePrivacyStatus = "unlisted";
 
         public ObsAgentConfiguration Clone()
         {
@@ -51,7 +59,15 @@ namespace ObsAgent
 
                 setSceneAfterLaunch = setSceneAfterLaunch,
                 startRecordingAfterLaunch = startRecordingAfterLaunch,
-                startStreamingAfterLaunch = startStreamingAfterLaunch
+                startStreamingAfterLaunch = startStreamingAfterLaunch,
+
+                youtubeOAuthClientId = youtubeOAuthClientId,
+                youtubeOAuthClientSecret = youtubeOAuthClientSecret,
+
+                youtubeObsSceneName = youtubeObsSceneName,
+                youtubeObsSourceName = youtubeObsSourceName,
+
+                youtubePrivacyStatus = youtubePrivacyStatus,
             };
         }
     }
@@ -102,7 +118,7 @@ namespace ObsAgent
     }
 
     [Serializable]
-    internal sealed class ObsSceneRequestData
+    public sealed class ObsSceneRequestData
     {
         public string sceneName;
     }
@@ -111,21 +127,25 @@ namespace ObsAgent
     {
         private const string FileName = "obs-agent-config.json";
 
-        public static string ConfigPath =>
-            Path.Combine( Application.persistentDataPath, FileName );
+        public static string ConfigPath => Path.Combine( Application.persistentDataPath, FileName );
+
+        public static ObsAgentConfiguration Clear()
+        {
+            File.Delete( ConfigPath );
+            return new ObsAgentConfiguration();
+        }
 
         public static ObsAgentConfiguration Load()
         {
             try
             {
                 Debug.Log( ConfigPath );
-                if( !File.Exists( ConfigPath ) )
+                if( File.Exists( ConfigPath ) == false )
                 {
                     return new ObsAgentConfiguration();
                 }
-                string json = File.ReadAllText(ConfigPath);
-                ObsAgentConfiguration config =
-                    JsonUtility.FromJson<ObsAgentConfiguration>(json);
+                var json = File.ReadAllText(ConfigPath);
+                var config = JsonUtility.FromJson<ObsAgentConfiguration>(json);
 
                 return config ?? new ObsAgentConfiguration();
             }
@@ -143,7 +163,7 @@ namespace ObsAgent
                 throw new ArgumentNullException( nameof( config ) );
             }
 
-            string directory = Path.GetDirectoryName(ConfigPath);
+            var directory = Path.GetDirectoryName(ConfigPath);
 
             if( !string.IsNullOrWhiteSpace( directory ) )
             {
@@ -228,6 +248,79 @@ namespace ObsAgent
 
                 utcTime = DateTime.UtcNow.ToString( "O" )
             };
+        }
+
+        [Serializable]
+        public sealed class ObsVideoSettingsRequest
+        {
+            public int baseWidth;
+            public int baseHeight;
+
+            public int outputWidth;
+            public int outputHeight;
+
+            public int fpsNumerator;
+            public int fpsDenominator;
+        }
+
+        [Serializable]
+        public sealed class ObsStreamServiceRequest
+        {
+            public string streamServiceType;
+            public ObsStreamServiceSettings streamServiceSettings;
+        }
+
+        [Serializable]
+        public sealed class ObsStreamServiceSettings
+        {
+            public string server;
+            public string key;
+        }
+
+        [Serializable]
+        public sealed class ObsSceneItemIdRequest
+        {
+            public string sceneName;
+            public string sourceName;
+        }
+
+        [Serializable]
+        public sealed class ObsSceneItemTransformRequest
+        {
+            public string sceneName;
+            public int sceneItemId;
+            public ObsSceneItemTransform sceneItemTransform;
+        }
+
+        [Serializable]
+        public sealed class ObsSceneItemTransform
+        {
+            public float positionX;
+            public float positionY;
+            public float rotation;
+            public int alignment;
+            public string boundsType;
+            public int boundsAlignment;
+            public float boundsWidth;
+            public float boundsHeight;
+        }
+
+        [Serializable]
+        public sealed class ObsSceneItemIdEnvelope
+        {
+            public ObsSceneItemIdEnvelopeData d;
+        }
+
+        [Serializable]
+        public sealed class ObsSceneItemIdEnvelopeData
+        {
+            public ObsSceneItemIdResponseData responseData;
+        }
+
+        [Serializable]
+        public sealed class ObsSceneItemIdResponseData
+        {
+            public int sceneItemId;
         }
     }
 }

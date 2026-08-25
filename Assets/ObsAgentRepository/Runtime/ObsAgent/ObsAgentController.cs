@@ -50,7 +50,8 @@ namespace ObsAgent
         private ObsAgentConfiguration _currentConfig;
         private ObsAgentOperations _operations; 
         private ObsVideoSessionStore _videoSessionStore;
-        private ObsAgentHttpServer _httpServer;
+        private ObsAgentHttpServer _httpServer; 
+        private YoutubeLiveCoordinator _youtubeLiveCoordinator;
 
         private CancellationTokenSource _lifetimeCancellation;
 
@@ -58,9 +59,11 @@ namespace ObsAgent
         private float _nextStatusRefreshTime;
         private bool _isCommandRunning;
         private bool _isShuttingDown;
+        private const int AgentTokenLength = 8;
 
         private void Awake()
         {
+            ObsAgentConfigStore.Clear();
             Application.runInBackground = true;
             Application.targetFrameRate = 15;
 
@@ -81,9 +84,11 @@ namespace ObsAgent
             ApplyConfigurationToUi( _currentConfig );
             _operations = new ObsAgentOperations( GetConfigSnapshot, EnqueueLog );
             _videoSessionStore = new ObsVideoSessionStore();
-            _httpServer = new ObsAgentHttpServer( GetConfigSnapshot, _operations, _videoSessionStore, EnqueueLog );
+            _httpServer = new ObsAgentHttpServer( GetConfigSnapshot, _operations, _videoSessionStore, _youtubeLiveCoordinator, EnqueueLog );
+            _youtubeLiveCoordinator = new YoutubeLiveCoordinator( GetConfigSnapshot, _operations, EnqueueLog );
             RegisterButtonEvents();
             EnqueueLog( $"{CurrentPlatformName}용 OBS Agent를 초기화했습니다." );
+
         }
 
         private void Start()
@@ -202,7 +207,23 @@ namespace ObsAgent
 
                 setSceneAfterLaunch = false,
                 startRecordingAfterLaunch = false,
-                startStreamingAfterLaunch = false
+                startStreamingAfterLaunch = false,
+
+                youtubeOAuthClientId = loaded.youtubeOAuthClientId ?? string.Empty,
+
+                youtubeOAuthClientSecret = loaded.youtubeOAuthClientSecret ?? string.Empty,
+
+                youtubeObsSceneName = string.IsNullOrWhiteSpace( loaded.youtubeObsSceneName )
+                    ? "YouTubeLive"
+                    : loaded.youtubeObsSceneName,
+
+                youtubeObsSourceName = string.IsNullOrWhiteSpace( loaded.youtubeObsSourceName )
+                    ? "OBS Receiver"
+                    : loaded.youtubeObsSourceName,
+
+                youtubePrivacyStatus = string.IsNullOrWhiteSpace( loaded.youtubePrivacyStatus )
+                    ? "unlisted"
+                    : loaded.youtubePrivacyStatus,
             };
         }
 
@@ -222,9 +243,9 @@ namespace ObsAgent
                 throw new InvalidOperationException( "OBS 실행 파일 경로를 입력하세요." );
             }
 
-            if( string.IsNullOrWhiteSpace( agentToken ) || agentToken.Length < 16 )
+            if( string.IsNullOrWhiteSpace( agentToken ) || agentToken.Length < AgentTokenLength )
             {
-                throw new InvalidOperationException( "Agent Token은 16자 이상이어야 합니다." );
+                throw new InvalidOperationException( $"Agent Token은 {AgentTokenLength}자 이상이어야 합니다." );
             }
             obsExecutablePathInput.SetTextWithoutNotify( obsPath );
 
@@ -332,14 +353,19 @@ namespace ObsAgent
             return result;
         }
 
+
         private static string GenerateSecureToken()
         {
-            byte[] bytes = new byte[32];
+            byte[] bytes = new byte[6];
+
             using( RandomNumberGenerator random = RandomNumberGenerator.Create() )
             {
                 random.GetBytes( bytes );
             }
-            return Convert.ToBase64String( bytes ) .TrimEnd( '=' ) .Replace( '+', '-' ) .Replace( '/', '_' );
+
+            return Convert.ToBase64String( bytes )
+                .Replace( '+', '-' )
+                .Replace( '/', '_' );
         }
 
         private void EnqueueLog( string message )
@@ -403,7 +429,9 @@ namespace ObsAgent
             finally
             {
                 _lifetimeCancellation?.Dispose();
-                _lifetimeCancellation = null;
+                _lifetimeCancellation = null; 
+                _youtubeLiveCoordinator?.Dispose();
+                _youtubeLiveCoordinator = null;
             }
         }
         private static string GetDefaultObsPath()

@@ -14,26 +14,36 @@ namespace ObsAgent
     {
         private const int MaxRequestBytes = 384 * 1024;
         private const int MaxBodyBytes = 256 * 1024;
+        private const int AgentTokenLength = 8;
 
         private readonly Func<ObsAgentConfiguration> _configProvider;
         private readonly ObsAgentOperations _operations;
         private readonly ObsVideoSessionStore _videoSessionStore;
+        private readonly YoutubeLiveCoordinator _youtubeLiveCoordinator;
         private readonly Action<string> _log;
 
         private TcpListener _listener;
         private CancellationTokenSource _cancellation;
         private Task _acceptLoop;
 
-        public bool IsRunning =>
-            _listener != null &&
+        public bool IsRunning => _listener != null &&
             _cancellation != null &&
             !_cancellation.IsCancellationRequested;
 
-        public ObsAgentHttpServer( Func<ObsAgentConfiguration> configProvider, ObsAgentOperations operations, ObsVideoSessionStore videoSessionStore, Action<string> log )
+        //public ObsAgentHttpServer( Func<ObsAgentConfiguration> configProvider, ObsAgentOperations operations, ObsVideoSessionStore videoSessionStore, Action<string> log )
+        //{
+        //    _configProvider = configProvider;
+        //    _operations = operations;
+        //    _videoSessionStore = videoSessionStore;
+        //    _log = log ?? ( _ => { } );
+        //}
+
+        public ObsAgentHttpServer( Func<ObsAgentConfiguration> configProvider, ObsAgentOperations operations, ObsVideoSessionStore videoSessionStore, YoutubeLiveCoordinator youtubeLiveCoordinator, Action<string> log )
         {
             _configProvider = configProvider;
             _operations = operations;
             _videoSessionStore = videoSessionStore;
+            _youtubeLiveCoordinator = youtubeLiveCoordinator;
             _log = log ?? ( _ => { } );
         }
 
@@ -52,9 +62,9 @@ namespace ObsAgent
             }
 
             if( string.IsNullOrWhiteSpace( config.agentToken ) ||
-                config.agentToken.Length < 16 )
+                config.agentToken.Length < AgentTokenLength )
             {
-                throw new InvalidOperationException( "Agent Token은 16자 이상이어야 합니다." );
+                throw new InvalidOperationException( $"Agent Token은 {AgentTokenLength}자 이상이어야 합니다." );
             }
 
             IPAddress bindAddress = config.allowLanClients ? IPAddress.Any : IPAddress.Loopback;
@@ -202,6 +212,35 @@ namespace ObsAgent
             if( !IsAuthorized( request ) )
             {
                 await WriteJsonAsync( stream, 401, AgentApiResponse.Error( "Authorization Bearer Token이 올바르지 않습니다.", _operations.IsObsRunning() ), cancellationToken );
+                return;
+            }
+
+            if( request.Method == "POST" && path == "/api/youtube/live/prepare" )
+            {
+                YoutubeLivePrepareRequest body = ParseJsonBody<YoutubeLivePrepareRequest>( request.Body );
+                YoutubeLiveStatusResponse response = _youtubeLiveCoordinator.BeginPrepare( body );
+                await WriteJsonAsync( stream, response.success ? 200 : 400, response, cancellationToken );
+                return;
+            }
+
+            if( request.Method == "POST" && path == "/api/youtube/live/start" )
+            {
+                YoutubeLiveStatusResponse response = _youtubeLiveCoordinator.BeginStart();
+                await WriteJsonAsync( stream, response.success ? 200 : 400, response, cancellationToken );
+                return;
+            }
+
+            if( request.Method == "POST" && path == "/api/youtube/live/stop" )
+            {
+                YoutubeLiveStatusResponse response = _youtubeLiveCoordinator.BeginStop();
+                await WriteJsonAsync( stream, response.success ? 200 : 400, response, cancellationToken );
+                return;
+            }
+
+            if( request.Method == "GET" && path == "/api/youtube/live/status" )
+            {
+                YoutubeLiveStatusResponse response = _youtubeLiveCoordinator.GetStatus();
+                await WriteJsonAsync( stream, 200, response, cancellationToken );
                 return;
             }
 
@@ -677,9 +716,18 @@ namespace ObsAgent
         {
             switch( path )
             {
+                // YouTube
+                case "/api/youtube/live/prepare":
+                case "/api/youtube/live/start":
+                case "/api/youtube/live/stop":
+                case "/api/youtube/live/status":
+
+                // WebRTC
                 case "/api/video/session/reset":
                 case "/api/video/offer":
                 case "/api/video/answer":
+
+                // OBS
                 case "/api/obs/launch":
                 case "/api/obs/test":
                 case "/api/obs/record/start":

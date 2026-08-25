@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using static ObsAgent.VideoSessionDescriptionResponse;
 
 namespace ObsAgent
 {
@@ -26,8 +27,7 @@ namespace ObsAgent
         {
             try
             {
-                foreach( string processName
-                         in GetObsProcessNames() )
+                foreach( string processName in GetObsProcessNames() )
                 {
                     Process[] processes = Process.GetProcessesByName( processName);
                     bool found = processes.Length > 0;
@@ -381,6 +381,87 @@ namespace ObsAgent
                 config.obsWebSocketPort > 65535 )
             {
                 throw new InvalidOperationException( "OBS WebSocket 포트가 올바르지 않습니다." );
+            }
+        }
+
+        public async Task<AgentApiResponse> ConfigureYoutubeOutputAsync( int width, int height, string sceneName, string sourceName, string rtmpsServer, string streamKey, CancellationToken cancellationToken )
+        {
+            await _commandGate.WaitAsync( cancellationToken );
+            try
+            {
+                ObsAgentConfiguration config = _configProvider().Clone();
+
+                using( var timeout = CancellationTokenSource.CreateLinkedTokenSource( cancellationToken ) )
+                {
+                    timeout.CancelAfter( TimeSpan.FromSeconds( 15 ) );
+
+                    using( var client = CreateWebSocketClient( config ) )
+                    {
+                        await client.ConnectAsync( timeout.Token );
+                        var videoSettings = new ObsVideoSettingsRequest
+                        {
+                            baseWidth = width,
+                            baseHeight = height,
+                            outputWidth = width,
+                            outputHeight = height,
+                            fpsNumerator = 30,
+                            fpsDenominator = 1
+                        };
+
+                        await client.RequestAsync( "SetVideoSettings", JsonUtility.ToJson( videoSettings ), timeout.Token );
+
+                        var streamService = new ObsStreamServiceRequest
+                        {
+                            streamServiceType = "rtmp_custom",
+                            streamServiceSettings = new ObsStreamServiceSettings { server = rtmpsServer, key = streamKey }
+                        };
+
+                        await client.RequestAsync( "SetStreamServiceSettings", JsonUtility.ToJson( streamService ), timeout.Token );
+                        var itemRequest = new ObsSceneItemIdRequest { sceneName = sceneName, sourceName = sourceName };
+                        string itemResponseJson = await client.RequestRawAsync( "GetSceneItemId", JsonUtility.ToJson( itemRequest ), timeout.Token );
+                        ObsSceneItemIdEnvelope envelope = JsonUtility.FromJson<ObsSceneItemIdEnvelope>( itemResponseJson );
+
+                        int sceneItemId = envelope?.d?
+                            .responseData?
+                            .sceneItemId ?? -1;
+
+                        if( sceneItemId < 0 )
+                        {
+                            throw new InvalidOperationException( "OBS Browser Source SceneItem을 찾지 못했습니다." );
+                        }
+
+                        var transformRequest = new ObsSceneItemTransformRequest 
+                        { 
+                            sceneName = sceneName, 
+                            sceneItemId = sceneItemId, 
+                            sceneItemTransform = new ObsSceneItemTransform
+                            {
+                                positionX = 0,
+                                positionY = 0,
+                                rotation = 0,
+                                // LEFT | TOP
+                                alignment = 5,
+                                boundsType = "OBS_BOUNDS_SCALE_INNER",
+                                boundsAlignment = 0,
+                                boundsWidth = width,
+                                boundsHeight = height
+                            }
+                    };
+
+                        await client.RequestAsync( "SetSceneItemTransform", JsonUtility.ToJson( transformRequest ), timeout.Token );
+                        await client.CloseAsync( timeout.Token );
+                    }
+                }
+
+                return AgentApiResponse.Ok( $"OBS 출력 설정 완료: {width}x{height}", true );
+            }
+            catch( Exception exception )
+            {
+                return AgentApiResponse.Error( exception.Message, IsObsRunning() );
+            }
+            finally
+            {
+                _commandGate.Release();
             }
         }
     }

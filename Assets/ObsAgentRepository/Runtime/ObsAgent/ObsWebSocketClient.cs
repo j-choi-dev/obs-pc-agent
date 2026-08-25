@@ -12,16 +12,12 @@ namespace ObsAgent
     public sealed class ObsWebSocketClient : IDisposable
     {
         private const int MaxMessageBytes = 1024 * 1024;
-
         private readonly Uri _uri;
         private readonly string _password;
 
         private ClientWebSocket _socket;
 
-        public ObsWebSocketClient(
-            string host,
-            int port,
-            string password )
+        public ObsWebSocketClient( string host, int port, string password )
         {
             _uri = new Uri( $"ws://{host}:{port}" );
             _password = password ?? string.Empty;
@@ -31,8 +27,7 @@ namespace ObsAgent
         {
             if( _socket != null )
             {
-                throw new InvalidOperationException(
-                    "OBS WebSocket 클라이언트가 이미 생성되었습니다." );
+                throw new InvalidOperationException( "OBS WebSocket 클라이언트가 이미 생성되었습니다." );
             }
 
             _socket = new ClientWebSocket();
@@ -43,13 +38,11 @@ namespace ObsAgent
 
             string helloJson = await ReceiveTextAsync(cancellationToken);
 
-            ObsHelloEnvelope hello =
-                JsonUtility.FromJson<ObsHelloEnvelope>(helloJson);
+            ObsHelloEnvelope hello = JsonUtility.FromJson<ObsHelloEnvelope>(helloJson);
 
             if( hello == null || hello.op != 0 || hello.d == null )
             {
-                throw new InvalidOperationException(
-                    $"OBS Hello 메시지가 올바르지 않습니다: {helloJson}" );
+                throw new InvalidOperationException( $"OBS Hello 메시지가 올바르지 않습니다: {helloJson}" );
             }
 
             int rpcVersion = hello.d.rpcVersion > 0
@@ -62,104 +55,66 @@ namespace ObsAgent
             {
                 if( string.IsNullOrEmpty( _password ) )
                 {
-                    throw new InvalidOperationException(
-                        "OBS WebSocket 인증이 활성화되어 있지만 " +
-                        "비밀번호가 설정되지 않았습니다." );
+                    throw new InvalidOperationException( "OBS WebSocket 인증이 활성화되어 있지만 비밀번호가 설정되지 않았습니다." );
                 }
-
-                authentication = CreateAuthentication(
-                    _password,
-                    hello.d.authentication.salt,
-                    hello.d.authentication.challenge );
+                authentication = CreateAuthentication( _password, hello.d.authentication.salt, hello.d.authentication.challenge );
             }
 
-            string identifyJson = CreateIdentifyJson(
-                rpcVersion,
-                authentication);
-
+            string identifyJson = CreateIdentifyJson( rpcVersion, authentication);
             await SendTextAsync( identifyJson, cancellationToken );
+            string identifiedJson = await ReceiveTextAsync(cancellationToken);
 
-            string identifiedJson =
-                await ReceiveTextAsync(cancellationToken);
-
-            ObsOpEnvelope identified =
-                JsonUtility.FromJson<ObsOpEnvelope>(identifiedJson);
+            ObsOpEnvelope identified = JsonUtility.FromJson<ObsOpEnvelope>(identifiedJson);
 
             if( identified == null || identified.op != 2 )
             {
-                throw new InvalidOperationException(
-                    $"OBS Identify 인증에 실패했습니다: {identifiedJson}" );
+                throw new InvalidOperationException( $"OBS Identify 인증에 실패했습니다: {identifiedJson}" );
             }
         }
 
-        public async Task RequestAsync(
-            string requestType,
-            string requestDataJson,
-            CancellationToken cancellationToken )
+        public async Task RequestAsync( string requestType, string requestDataJson, CancellationToken cancellationToken )
+        {
+            await RequestRawAsync( requestType, requestDataJson, cancellationToken );
+        }
+
+        public async Task<string> RequestRawAsync( string requestType, string requestDataJson, CancellationToken cancellationToken )
         {
             EnsureConnected();
-
-            string requestId = Guid.NewGuid().ToString("N");
-            string requestJson = CreateRequestJson(
-                requestType,
-                requestId,
-                requestDataJson);
+            string requestId = Guid.NewGuid().ToString( "N" );
+            string requestJson = CreateRequestJson( requestType, requestId, requestDataJson );
 
             await SendTextAsync( requestJson, cancellationToken );
 
             while( true )
             {
-                string responseJson =
-                    await ReceiveTextAsync(cancellationToken);
-
-                ObsRequestResponseEnvelope response =
-                    JsonUtility.FromJson<ObsRequestResponseEnvelope>(
-                        responseJson);
-
-                // 이벤트 등 다른 메시지가 들어왔다면 다음 메시지를 기다린다.
+                string responseJson = await ReceiveTextAsync( cancellationToken );
+                ObsRequestResponseEnvelope response = JsonUtility.FromJson<ObsRequestResponseEnvelope>( responseJson );
                 if( response == null || response.op != 7 || response.d == null )
                 {
                     continue;
                 }
-
-                if( !string.Equals(
-                        response.d.requestId,
-                        requestId,
-                        StringComparison.Ordinal ) )
+                if( !string.Equals( response.d.requestId, requestId, StringComparison.Ordinal ) )
                 {
                     continue;
                 }
-
                 if( response.d.requestStatus == null )
                 {
-                    throw new InvalidOperationException(
-                        $"OBS 응답 상태가 없습니다: {responseJson}" );
+                    throw new InvalidOperationException( $"OBS 응답 상태가 없습니다: {responseJson}" );
                 }
-
                 if( !response.d.requestStatus.result )
                 {
-                    string comment =
-                        response.d.requestStatus.comment
-                        ?? "세부 오류 정보 없음";
+                    string comment = response.d.requestStatus.comment ?? "세부 오류 정보 없음";
 
-                    throw new InvalidOperationException(
-                        $"{requestType} 실패. " +
-                        $"Code={response.d.requestStatus.code}, " +
-                        $"Comment={comment}" );
+                    throw new InvalidOperationException( $"{requestType} 실패. Code={response.d.requestStatus.code}, Comment={comment}" );
                 }
 
-                return;
+                return responseJson;
             }
         }
 
-        public Task RequestAsync(
-            string requestType,
-            CancellationToken cancellationToken )
+        public Task RequestAsync( string requestType, CancellationToken cancellationToken )
         {
-            return RequestAsync(
-                requestType,
-                null,
-                cancellationToken );
+            return RequestAsync( requestType, null, cancellationToken );
         }
 
         public async Task CloseAsync( CancellationToken cancellationToken )
@@ -173,10 +128,7 @@ namespace ObsAgent
             {
                 try
                 {
-                    await _socket.CloseAsync(
-                        WebSocketCloseStatus.NormalClosure,
-                        "Agent request completed",
-                        cancellationToken );
+                    await _socket.CloseAsync( WebSocketCloseStatus.NormalClosure, "Agent request completed", cancellationToken );
                 }
                 catch
                 {
@@ -185,21 +137,14 @@ namespace ObsAgent
             }
         }
 
-        private async Task SendTextAsync(
-            string message,
-            CancellationToken cancellationToken )
+        private async Task SendTextAsync( string message, CancellationToken cancellationToken )
         {
             byte[] bytes = Encoding.UTF8.GetBytes(message);
 
-            await _socket.SendAsync(
-                new ArraySegment<byte>( bytes ),
-                WebSocketMessageType.Text,
-                true,
-                cancellationToken );
+            await _socket.SendAsync( new ArraySegment<byte>( bytes ), WebSocketMessageType.Text, true, cancellationToken );
         }
 
-        private async Task<string> ReceiveTextAsync(
-            CancellationToken cancellationToken )
+        private async Task<string> ReceiveTextAsync( CancellationToken cancellationToken )
         {
             byte[] buffer = new byte[8192];
 
@@ -207,31 +152,19 @@ namespace ObsAgent
             {
                 while( true )
                 {
-                    WebSocketReceiveResult result =
-                        await _socket.ReceiveAsync(
-                            new ArraySegment<byte>(buffer),
-                            cancellationToken);
-
+                    WebSocketReceiveResult result = await _socket.ReceiveAsync( new ArraySegment<byte>(buffer), cancellationToken);
                     if( result.MessageType == WebSocketMessageType.Close )
                     {
-                        throw new WebSocketException(
-                            $"OBS WebSocket 연결이 종료되었습니다. " +
-                            $"Status={_socket.CloseStatus}, " +
-                            $"Description={_socket.CloseStatusDescription}" );
+                        throw new WebSocketException( $"OBS WebSocket 연결이 종료되었습니다. Status={_socket.CloseStatus}, Description={_socket.CloseStatusDescription}" );
                     }
-
                     if( result.MessageType != WebSocketMessageType.Text )
                     {
-                        throw new WebSocketException(
-                            "OBS에서 Text가 아닌 WebSocket 메시지를 받았습니다." );
+                        throw new WebSocketException( "OBS에서 Text가 아닌 WebSocket 메시지를 받았습니다." );
                     }
-
                     memory.Write( buffer, 0, result.Count );
-
                     if( memory.Length > MaxMessageBytes )
                     {
-                        throw new InvalidOperationException(
-                            "OBS WebSocket 메시지가 허용 크기를 초과했습니다." );
+                        throw new InvalidOperationException( "OBS WebSocket 메시지가 허용 크기를 초과했습니다." );
                     }
 
                     if( result.EndOfMessage )
@@ -244,17 +177,13 @@ namespace ObsAgent
 
         private void EnsureConnected()
         {
-            if( _socket == null ||
-                _socket.State != WebSocketState.Open )
+            if( _socket == null || _socket.State != WebSocketState.Open )
             {
-                throw new InvalidOperationException(
-                    "OBS WebSocket이 연결되어 있지 않습니다." );
+                throw new InvalidOperationException( "OBS WebSocket이 연결되어 있지 않습니다." );
             }
         }
 
-        private static string CreateIdentifyJson(
-            int rpcVersion,
-            string authentication )
+        private static string CreateIdentifyJson( int rpcVersion, string authentication )
         {
             var builder = new StringBuilder();
 
@@ -271,14 +200,10 @@ namespace ObsAgent
             }
 
             builder.Append( "}}" );
-
             return builder.ToString();
         }
 
-        private static string CreateRequestJson(
-            string requestType,
-            string requestId,
-            string requestDataJson )
+        private static string CreateRequestJson( string requestType, string requestId, string requestDataJson )
         {
             var builder = new StringBuilder();
 
@@ -300,10 +225,7 @@ namespace ObsAgent
             return builder.ToString();
         }
 
-        private static string CreateAuthentication(
-            string password,
-            string salt,
-            string challenge )
+        private static string CreateAuthentication( string password, string salt, string challenge )
         {
             string secret = Sha256Base64(password + salt);
             return Sha256Base64( secret + challenge );
