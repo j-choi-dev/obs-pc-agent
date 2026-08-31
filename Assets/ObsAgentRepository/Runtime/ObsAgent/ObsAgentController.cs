@@ -31,6 +31,7 @@ namespace ObsAgent
 #endif
 
         [Header("Required Input Fields")]
+        [SerializeField] private TMP_Text endPointOutput;
         [SerializeField] private TMP_InputField obsExecutablePathInput;
         [SerializeField] private TMP_InputField obsWebSocketPasswordInput;
         [SerializeField] private TMP_InputField agentTokenInput;
@@ -39,6 +40,8 @@ namespace ObsAgent
         [SerializeField] private Button applyAndStartButton;
         [SerializeField] private Button launchObsButton;
         [SerializeField] private Button testObsButton;
+        [SerializeField] private Button tokenRegenButton;
+        [SerializeField] private Button copyButtonButton;
 
         [Header("Required Status")]
         [SerializeField] private TMP_Text statusText;
@@ -48,9 +51,9 @@ namespace ObsAgent
         private readonly ConcurrentQueue<string> _pendingLogs = new ConcurrentQueue<string>();
 
         private ObsAgentConfiguration _currentConfig;
-        private ObsAgentOperations _operations; 
+        private ObsAgentOperations _operations;
         private ObsVideoSessionStore _videoSessionStore;
-        private ObsAgentHttpServer _httpServer; 
+        private ObsAgentHttpServer _httpServer;
         private YoutubeLiveCoordinator _youtubeLiveCoordinator;
 
         private CancellationTokenSource _lifetimeCancellation;
@@ -63,11 +66,10 @@ namespace ObsAgent
 
         private void Awake()
         {
-            ObsAgentConfigStore.Clear();
             Application.runInBackground = true;
             Application.targetFrameRate = 15;
 
-            if( !ValidateUiReferences() )
+            if( ValidateUiReferences() == false )
             {
                 enabled = false;
                 return;
@@ -75,15 +77,16 @@ namespace ObsAgent
 
             _lifetimeCancellation = new CancellationTokenSource();
             _currentConfig = CreateCompactConfiguration( ObsAgentConfigStore.Load() );
-            if( string.IsNullOrWhiteSpace( _currentConfig.agentToken ) )
+            if( IsNeedRengeToken( _currentConfig.agentToken ) )
             {
                 _currentConfig.agentToken = GenerateSecureToken();
+                EnqueueLog( "저장된 Agent Token이 없거나 유효하지 않아 새 Token을 생성했습니다." );
             }
-
             ObsAgentConfigStore.Save( _currentConfig );
             ApplyConfigurationToUi( _currentConfig );
             _operations = new ObsAgentOperations( GetConfigSnapshot, EnqueueLog );
             _videoSessionStore = new ObsVideoSessionStore();
+            _youtubeLiveCoordinator = new YoutubeLiveCoordinator( GetConfigSnapshot, _operations, EnqueueLog );
             _httpServer = new ObsAgentHttpServer( GetConfigSnapshot, _operations, _videoSessionStore, _youtubeLiveCoordinator, EnqueueLog );
             _youtubeLiveCoordinator = new YoutubeLiveCoordinator( GetConfigSnapshot, _operations, EnqueueLog );
             RegisterButtonEvents();
@@ -107,12 +110,23 @@ namespace ObsAgent
                 RefreshStatusText();
             }
         }
+        private bool IsNeedRengeToken( string token )
+        {
+            if( string.IsNullOrWhiteSpace( token ) )
+            {
+                return true;
+            }
+            string normalized = token.Trim();
+            return normalized.Length < AgentTokenLength || normalized.Length > AgentTokenLength;
+        }
 
         private void RegisterButtonEvents()
         {
             applyAndStartButton.onClick.AddListener( StartOrRestartAgent );
             launchObsButton.onClick.AddListener( LaunchObs );
             testObsButton.onClick.AddListener( TestObsConnection );
+            tokenRegenButton.onClick.AddListener( RegenerateAgentToken );
+            copyButtonButton.onClick.AddListener( CopyConnectionInfo );
         }
 
         /// <summary>
@@ -127,15 +141,19 @@ namespace ObsAgent
                 if( _httpServer.IsRunning )
                 {
                     _httpServer.Stop();
+                    endPointOutput.text =  string.Empty;
                 }
                 _videoSessionStore.Clear();
                 _httpServer.Start();
+
                 EnqueueLog( $"Agent 서버를 시작했습니다. Port={AgentPort}" );
             }
             catch( Exception exception )
             {
+                endPointOutput.text =  string.Empty;
                 EnqueueLog( $"Agent 서버 시작 실패: {exception.Message}" );
             }
+            endPointOutput.text =  _httpServer != null && _httpServer.IsRunning ? GetAgentEndpoint() : string.Empty;
             RefreshStatusText();
         }
 
@@ -147,6 +165,67 @@ namespace ObsAgent
         private void TestObsConnection()
         {
             RunOperation( token => _operations.TestConnectionAsync( token ) );
+        }
+
+        private void RegenerateAgentToken()
+        {
+            try
+            {
+                string newToken = GenerateSecureToken();
+                lock( _configLock )
+                {
+                    if( _currentConfig == null )
+                    {
+                        throw new InvalidOperationException( "Agent 설정이 초기화되지 않았습니다." );
+                    }
+                    _currentConfig.agentToken = newToken;
+                }
+
+                agentTokenInput.SetTextWithoutNotify( newToken );
+                ObsAgentConfigStore.Save( GetConfigSnapshot() );
+                EnqueueLog( "Agent Token을 새로 생성하고 저장했습니다." );
+                RefreshStatusText();
+            }
+            catch( Exception exception )
+            {
+                EnqueueLog( $"Agent Token 재생성 실패: {exception.Message}" );
+            }
+        }
+        private void CopyConnectionInfo()
+        {
+            try
+            {
+                string endpoint = endPointOutput != null ? endPointOutput.text.Trim() : string.Empty;
+                if( string.IsNullOrWhiteSpace( endpoint ) )
+                {
+                    endpoint = GetAgentEndpoint();
+                }
+                string token;
+                lock( _configLock )
+                {
+                    token = _currentConfig?.agentToken ?? string.Empty;
+                }
+
+                if( string.IsNullOrWhiteSpace( endpoint ) )
+                {
+                    throw new InvalidOperationException( "Agent Endpoint가 없습니다." );
+                }
+
+                if( string.IsNullOrWhiteSpace( token ) )
+                {
+                    throw new InvalidOperationException( "Agent Token이 없습니다." );
+                }
+
+                string copyText =            $"Endpoint: {endpoint}\nAgent Token: {token}";
+
+                GUIUtility.systemCopyBuffer =                    copyText;
+
+                EnqueueLog( "Endpoint와 Agent Token을 클립보드에 복사했습니다." );
+            }
+            catch( Exception exception )
+            {
+                EnqueueLog( $"연결 정보 복사 실패: {exception.Message}" );
+            }
         }
 
         private async void RunOperation( Func<CancellationToken, Task<AgentApiResponse>> operation )
@@ -196,7 +275,7 @@ namespace ObsAgent
                 autoStartServer = true,
 
                 agentToken = loaded.agentToken ?? string.Empty,
-                obsExecutablePath = string.IsNullOrWhiteSpace( loaded.obsExecutablePath ) ? GetDefaultObsPath() : NormalizeObsPath(loaded.obsExecutablePath ),
+                obsExecutablePath = string.IsNullOrWhiteSpace( loaded.obsExecutablePath ) ? GetDefaultObsPath() : NormalizeObsPath( loaded.obsExecutablePath ),
                 obsWebSocketPort = ObsWebSocketPort,
                 obsWebSocketPassword = loaded.obsWebSocketPassword ?? string.Empty,
 
@@ -387,16 +466,21 @@ namespace ObsAgent
             applyAndStartButton.interactable = interactable;
             launchObsButton.interactable = interactable;
             testObsButton.interactable = interactable;
+            tokenRegenButton.interactable = interactable;
+            copyButtonButton.interactable = true;
         }
 
         private bool ValidateUiReferences()
         {
-            bool valid = obsExecutablePathInput != null &&
+            bool valid = endPointOutput != null &&
+                obsExecutablePathInput != null &&
                 obsWebSocketPasswordInput != null &&
                 agentTokenInput != null &&
                 applyAndStartButton != null &&
                 launchObsButton != null &&
                 testObsButton != null &&
+                tokenRegenButton != null &&
+                copyButtonButton != null &&
                 statusText != null;
 
             if( !valid )
@@ -419,7 +503,7 @@ namespace ObsAgent
             try
             {
                 _lifetimeCancellation?.Cancel();
-                _httpServer?.Stop(); 
+                _httpServer?.Stop();
                 _videoSessionStore?.Clear();
             }
             catch( Exception exception )
@@ -429,7 +513,7 @@ namespace ObsAgent
             finally
             {
                 _lifetimeCancellation?.Dispose();
-                _lifetimeCancellation = null; 
+                _lifetimeCancellation = null;
                 _youtubeLiveCoordinator?.Dispose();
                 _youtubeLiveCoordinator = null;
             }
