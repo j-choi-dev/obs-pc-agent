@@ -1,4 +1,8 @@
 #if UNITY_EDITOR_WIN || UNITY_EDITOR_OSX || UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX
+using Cysharp.Threading.Tasks;
+using SimpleJSON;
+using StudioSystemSDK.Domain;
+using StudioSystemSDK.Infrastructure;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -31,6 +35,7 @@ namespace ObsAgent
 #endif
 
         [Header("Required Input Fields")]
+        [SerializeField] private TMP_Text youtubeOAuthClientIdInput;
         [SerializeField] private TMP_Text endPointOutput;
         [SerializeField] private TMP_InputField obsExecutablePathInput;
         [SerializeField] private TMP_InputField obsWebSocketPasswordInput;
@@ -45,6 +50,15 @@ namespace ObsAgent
 
         [Header("Required Status")]
         [SerializeField] private TMP_Text statusText;
+
+        private const string AuthFileName = "Auth.bin";
+
+        [Header("Crypto")]
+        [SerializeField] private CryptoKeySetting cryptoKeySetting;
+
+        private readonly AESCryptoProcessor _cryptoProcessor = new AESCryptoProcessor();
+
+        private readonly FileSerializer _fileSerializer = new FileSerializer();
 
         private readonly object _configLock = new object();
 
@@ -94,8 +108,15 @@ namespace ObsAgent
 
         }
 
-        private void Start()
+        private async void Start()
         {
+            bool authLoaded = await LoadAuthConfigurationAsync();
+
+            if( !authLoaded )
+            {
+                EnqueueLog( "Auth.bin 로드에 실패했습니다. YouTube 기능은 사용할 수 없습니다." );
+            }
+
             // 실행 직후 Agent 서버를 자동으로 시작한다.
             StartOrRestartAgent();
         }
@@ -578,6 +599,148 @@ namespace ObsAgent
         return false;
 #endif
             }
+        }
+        private async UniTask<bool>
+    LoadAuthConfigurationAsync()
+        {
+            try
+            {
+                if( cryptoKeySetting == null )
+                {
+                    throw new InvalidOperationException( "CryptoKeySetting이 Inspector에 연결되지 않았습니다." );
+                }
+
+                string cryptoKey = cryptoKeySetting.CryptoKey;
+
+                if( string.IsNullOrWhiteSpace( cryptoKey ) )
+                {
+                    throw new InvalidOperationException( "Crypto Key가 비어 있습니다." );
+                }
+
+                string authPath =
+            Path.Combine(
+                SystemPathValue.ConfigOriginRoot,
+                AuthFileName );
+
+                EnqueueLog(
+                    $"Auth 설정 파일을 읽습니다: {authPath}" );
+
+                if( !File.Exists( authPath ) )
+                {
+                    throw new FileNotFoundException( "Auth.bin 파일을 찾을 수 없습니다.", authPath );
+                }
+
+                string encryptedText = await UniTask.RunOnThreadPool( () => File.ReadAllText( authPath ) );
+
+                if( string.IsNullOrWhiteSpace( encryptedText ) )
+                {
+                    throw new InvalidOperationException( "Auth.bin 내용이 비어 있습니다." );
+                }
+
+                encryptedText = encryptedText.Trim();
+
+                string decryptedJson = _cryptoProcessor.ConvertDecryptedString( encryptedText, cryptoKey );
+
+                if( string.IsNullOrWhiteSpace( decryptedJson ) )
+                {
+                    throw new InvalidOperationException( "Auth.bin 복호화 결과가 비어 있습니다." );
+                }
+
+                ObsAgentAuthData authData = ParseAuthData( decryptedJson );
+
+                if( authData == null )
+                {
+                    throw new InvalidOperationException( "Auth.bin의 JSON 데이터를 해석하지 못했습니다." );
+                }
+
+                string youtubeClientId = authData?.client_id?.Trim() ?? string.Empty;
+
+                if( string.IsNullOrWhiteSpace( youtubeClientId ) )
+                {
+                    throw new InvalidOperationException( "Auth.bin에 YouTube OAuth Client ID가 없습니다." );
+                }
+
+                // 기본적인 Client ID 오입력 방지.
+                if( !youtubeClientId.EndsWith( ".apps.googleusercontent.com", StringComparison.OrdinalIgnoreCase ) )
+                {
+                    throw new InvalidOperationException( "YouTube OAuth Client ID 형식이 올바르지 않습니다." );
+                }
+
+                // UI에 반영
+                youtubeOAuthClientIdInput.text = youtubeClientId;
+
+                // 현재 Agent Configuration에도 즉시 반영
+                lock( _configLock )
+                {
+                    if( _currentConfig == null )
+                    {
+                        throw new InvalidOperationException( "Agent Configuration이 초기화되지 않았습니다." );
+                    }
+
+                    _currentConfig.youtubeOAuthClientId = youtubeClientId;
+                }
+
+                // Store에도 반영
+                ObsAgentConfigStore.Save( GetConfigSnapshot() );
+
+                EnqueueLog( "YouTube OAuth Client ID를 Auth.bin에서 불러왔습니다." );
+
+                return true;
+            }
+            catch( CryptographicException exception )
+            {
+                EnqueueLog( "Auth.bin 복호화에 실패했습니다. Crypto Key 또는 파일 내용을 확인하세요." );
+                Debug.LogException( exception );
+                return false;
+            }
+            catch( FormatException exception )
+            {
+                EnqueueLog( "Auth.bin 암호화 데이터 형식이 올바르지 않습니다." );
+                Debug.LogException( exception );
+                return false;
+            }
+            catch( Exception exception )
+            {
+                EnqueueLog( $"Auth 설정 로드 실패: {exception.Message}" );
+                Debug.LogException( exception );
+                return false;
+            }
+        }
+        private ObsAgentAuthData ParseAuthData(
+    string decryptedJson )
+        {
+            if( string.IsNullOrWhiteSpace(
+                    decryptedJson ) )
+            {
+                throw new InvalidOperationException(
+                    "복호화된 Auth JSON이 비어 있습니다." );
+            }
+
+            JSONNode root =
+        JSON.Parse(
+            decryptedJson );
+
+            if( root == null ||
+                root["installed"] == null )
+            {
+                throw new InvalidOperationException(
+                    "Auth JSON에 installed 정보가 없습니다." );
+            }
+
+            string installedJson =
+        root["installed"].ToString();
+
+            ObsAgentAuthData authData =
+        JsonUtility.FromJson<ObsAgentAuthData>(
+            installedJson );
+
+            if( authData == null )
+            {
+                throw new InvalidOperationException(
+                    "Auth JSON 파싱에 실패했습니다." );
+            }
+
+            return authData;
         }
 
         private void OnApplicationQuit()
