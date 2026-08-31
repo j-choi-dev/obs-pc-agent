@@ -11,6 +11,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
@@ -23,6 +24,7 @@ namespace ObsAgent
     {
         private const int AgentPort = 7443;
         private const int ObsWebSocketPort = 4455;
+        private const string YoutubeScope = "https://www.googleapis.com/auth/youtube.force-ssl";
 
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
         private const string DefaultObsPath = @"C:\Program Files\obs-studio\bin\64bit\obs64.exe";
@@ -57,8 +59,6 @@ namespace ObsAgent
         [SerializeField] private CryptoKeySetting cryptoKeySetting;
 
         private readonly AESCryptoProcessor _cryptoProcessor = new AESCryptoProcessor();
-
-        private readonly FileSerializer _fileSerializer = new FileSerializer();
 
         private readonly object _configLock = new object();
 
@@ -102,7 +102,6 @@ namespace ObsAgent
             _videoSessionStore = new ObsVideoSessionStore();
             _youtubeLiveCoordinator = new YoutubeLiveCoordinator( GetConfigSnapshot, _operations, EnqueueLog );
             _httpServer = new ObsAgentHttpServer( GetConfigSnapshot, _operations, _videoSessionStore, _youtubeLiveCoordinator, EnqueueLog );
-            _youtubeLiveCoordinator = new YoutubeLiveCoordinator( GetConfigSnapshot, _operations, EnqueueLog );
             RegisterButtonEvents();
             EnqueueLog( $"{CurrentPlatformName}용 OBS Agent를 초기화했습니다." );
 
@@ -348,6 +347,7 @@ namespace ObsAgent
                 throw new InvalidOperationException( $"Agent Token은 {AgentTokenLength}자 이상이어야 합니다." );
             }
             obsExecutablePathInput.SetTextWithoutNotify( obsPath );
+            ObsAgentConfiguration previous = GetConfigSnapshot();
 
             var updated = new ObsAgentConfiguration
             {
@@ -364,7 +364,12 @@ namespace ObsAgent
                 minimizeToTray = DefaultMinimizeToTray,
                 setSceneAfterLaunch = false,
                 startRecordingAfterLaunch = false,
-                startStreamingAfterLaunch = false
+                startStreamingAfterLaunch = false,
+                youtubeOAuthClientId = previous.youtubeOAuthClientId ?? string.Empty,
+                youtubeOAuthClientSecret = previous.youtubeOAuthClientSecret ?? string.Empty,
+                youtubeObsSceneName = string.IsNullOrWhiteSpace( previous.youtubeObsSceneName ) ? "YouTubeLive" : previous.youtubeObsSceneName,
+                youtubeObsSourceName = string.IsNullOrWhiteSpace( previous.youtubeObsSourceName ) ? "OBS Receiver" : previous.youtubeObsSourceName,
+                youtubePrivacyStatus = string.IsNullOrWhiteSpace( previous.youtubePrivacyStatus ) ? "unlisted" : previous.youtubePrivacyStatus
             };
             lock( _configLock )
             {
@@ -741,6 +746,48 @@ namespace ObsAgent
             }
 
             return authData;
+        }
+        private static string CreateCodeVerifier()
+        {
+            byte[] bytes =
+        new byte[32];
+
+            using(
+                RandomNumberGenerator random =
+                    RandomNumberGenerator.Create() )
+            {
+                random.GetBytes( bytes );
+            }
+
+            return Base64UrlEncode(
+                bytes );
+        }
+
+        private static string CreateCodeChallenge(
+            string codeVerifier )
+        {
+            byte[] source =
+        Encoding.ASCII.GetBytes(
+            codeVerifier );
+
+            using(
+                SHA256 sha256 =
+                    SHA256.Create() )
+            {
+                return Base64UrlEncode(
+                    sha256.ComputeHash(
+                        source ) );
+            }
+        }
+
+        private static string Base64UrlEncode(
+            byte[] value )
+        {
+            return Convert
+                .ToBase64String( value )
+                .TrimEnd( '=' )
+                .Replace( '+', '-' )
+                .Replace( '/', '_' );
         }
 
         private void OnApplicationQuit()
