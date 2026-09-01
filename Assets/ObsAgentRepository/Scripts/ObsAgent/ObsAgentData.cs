@@ -134,13 +134,13 @@ namespace ObsAgent
             ConfigPath = Path.Combine( Application.persistentDataPath, FileName );
         }
 
-        public static ObsAgentConfiguration Clear()
+        public ObsAgentConfiguration Clear()
         {
             File.Delete( ConfigPath );
             return new ObsAgentConfiguration();
         }
 
-        public static ObsAgentConfiguration Load()
+        public ObsAgentConfiguration Load()
         {
             try
             {
@@ -161,7 +161,7 @@ namespace ObsAgent
             }
         }
 
-        public static void Save( ObsAgentConfiguration config )
+        public void Save( ObsAgentConfiguration config )
         {
             if( config == null )
             {

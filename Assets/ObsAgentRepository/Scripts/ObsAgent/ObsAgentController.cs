@@ -66,6 +66,7 @@ namespace ObsAgent
 
         private ObsAgentConfiguration _currentConfig;
         private ObsAgentOperations _operations;
+        private ObsAgentConfigStore _obsAgentConfigStore;
         private ObsVideoSessionStore _videoSessionStore;
         private ObsAgentHttpServer _httpServer;
         private YoutubeLiveCoordinator _youtubeLiveCoordinator;
@@ -83,6 +84,7 @@ namespace ObsAgent
             Application.runInBackground = true;
             Application.targetFrameRate = 15;
             string persistentDataPath = Application.persistentDataPath;
+            _obsAgentConfigStore = new ObsAgentConfigStore();
 
             if( ValidateUiReferences() == false )
             {
@@ -91,13 +93,13 @@ namespace ObsAgent
             }
 
             _lifetimeCancellation = new CancellationTokenSource();
-            _currentConfig = CreateCompactConfiguration( ObsAgentConfigStore.Load() );
+            _currentConfig = CreateCompactConfiguration( _obsAgentConfigStore.Load() );
             if( IsNeedRengeToken( _currentConfig.agentToken ) )
             {
                 _currentConfig.agentToken = GenerateSecureToken();
                 EnqueueLog( "저장된 Agent Token이 없거나 유효하지 않아 새 Token을 생성했습니다." );
             }
-            ObsAgentConfigStore.Save( _currentConfig );
+            _obsAgentConfigStore.Save( _currentConfig );
             ApplyConfigurationToUi( _currentConfig );
             _operations = new ObsAgentOperations( GetConfigSnapshot, EnqueueLog );
             _videoSessionStore = new ObsVideoSessionStore();
@@ -158,7 +160,7 @@ namespace ObsAgent
             try
             {
                 ApplyUiToConfiguration();
-                ObsAgentConfigStore.Save( GetConfigSnapshot() );
+                _obsAgentConfigStore.Save( GetConfigSnapshot() );
                 if( _httpServer.IsRunning )
                 {
                     _httpServer.Stop();
@@ -203,7 +205,7 @@ namespace ObsAgent
                 }
 
                 agentTokenInput.SetTextWithoutNotify( newToken );
-                ObsAgentConfigStore.Save( GetConfigSnapshot() );
+                _obsAgentConfigStore.Save( GetConfigSnapshot() );
                 EnqueueLog( "Agent Token을 새로 생성하고 저장했습니다." );
                 RefreshStatusText();
             }
@@ -263,7 +265,7 @@ namespace ObsAgent
             try
             {
                 ApplyUiToConfiguration();
-                ObsAgentConfigStore.Save( GetConfigSnapshot() );
+                _obsAgentConfigStore.Save( GetConfigSnapshot() );
                 AgentApiResponse response = await operation( _lifetimeCancellation.Token);
                 EnqueueLog( response.success ? response.message : $"실패: {response.message}" );
             }
@@ -690,7 +692,7 @@ namespace ObsAgent
                     _currentConfig.youtubeOAuthClientSecret = youtubeClientSecret;
                 }
                 // Store에도 반영
-                ObsAgentConfigStore.Save( GetConfigSnapshot() );
+                _obsAgentConfigStore.Save( GetConfigSnapshot() );
                 EnqueueLog( "YouTube OAuth Client ID와 Client Secret을 Auth.bin에서 불러왔습니다." );
 
                 return true;
