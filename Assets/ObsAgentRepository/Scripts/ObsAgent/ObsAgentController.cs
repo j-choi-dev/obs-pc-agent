@@ -338,20 +338,33 @@ namespace ObsAgent
             obsExecutablePathInput.SetTextWithoutNotify( config.obsExecutablePath );
             obsWebSocketPasswordInput.SetTextWithoutNotify( config.obsWebSocketPassword );
             agentTokenInput.SetTextWithoutNotify( config.agentToken );
+            obsSceneNameInput.SetTextWithoutNotify( config.youtubeObsSceneName );
+            obsSourceNameInput.SetTextWithoutNotify( config.youtubeObsSourceName );
         }
 
         private void ApplyUiToConfiguration()
         {
             string obsPath = NormalizeObsPath( obsExecutablePathInput.text);
-            string agentToken = agentTokenInput.text.Trim();
             if( string.IsNullOrWhiteSpace( obsPath ) )
             {
                 throw new InvalidOperationException( "OBS 실행 파일 경로를 입력하세요." );
             }
 
+            string agentToken = agentTokenInput.text.Trim();
             if( string.IsNullOrWhiteSpace( agentToken ) || agentToken.Length < AgentTokenLength )
             {
                 throw new InvalidOperationException( $"Agent Token은 {AgentTokenLength}자 이상이어야 합니다." );
+            }
+            string obsSceneName = obsSceneNameInput.text.Trim();
+            if( string.IsNullOrWhiteSpace( obsSceneName ) )
+            {
+                throw new InvalidOperationException( "OBS Scene Name을 입력하세요." );
+            }
+
+            string obsSourceName = obsSourceNameInput.text.Trim();
+            if( string.IsNullOrWhiteSpace( obsSourceName ) )
+            {
+                throw new InvalidOperationException( "OBS Source Name을 입력하세요." );
             }
             obsExecutablePathInput.SetTextWithoutNotify( obsPath );
             ObsAgentConfiguration previous = GetConfigSnapshot();
@@ -379,8 +392,8 @@ namespace ObsAgent
                 youtubeOAuthClientId = previous.youtubeOAuthClientId ?? string.Empty,
                 youtubeOAuthClientSecret = previous.youtubeOAuthClientSecret ?? string.Empty,
 
-                youtubeObsSceneName = string.IsNullOrWhiteSpace( previous.youtubeObsSceneName ) ? "YouTubeLive" : previous.youtubeObsSceneName,
-                youtubeObsSourceName = string.IsNullOrWhiteSpace( previous.youtubeObsSourceName ) ? "OBS Receiver" : previous.youtubeObsSourceName,
+                youtubeObsSceneName = obsSceneName,
+                youtubeObsSourceName = obsSourceName,
                 youtubePrivacyStatus = string.IsNullOrWhiteSpace( previous.youtubePrivacyStatus ) ? "unlisted" : previous.youtubePrivacyStatus
             };
             lock( _configLock )
@@ -514,6 +527,8 @@ namespace ObsAgent
                 obsExecutablePathInput != null &&
                 obsWebSocketPasswordInput != null &&
                 agentTokenInput != null &&
+                obsSceneNameInput != null &&
+                obsSourceNameInput != null &&
                 applyAndStartButton != null &&
                 launchObsButton != null &&
                 testObsButton != null &&
