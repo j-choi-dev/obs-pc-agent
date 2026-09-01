@@ -18,6 +18,7 @@ namespace ObsAgent
         private const string AuthorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
         private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
         private const string YoutubeScope = "https://www.googleapis.com/auth/youtube.force-ssl";
+        private const float TimeOutSeconds = 120f;
 
         private readonly Func<ObsAgentConfiguration> _configProvider;
         private readonly YoutubeOAuthCredentialStore _credentialStore;
@@ -27,38 +28,38 @@ namespace ObsAgent
         private string _accessToken;
         private DateTime _accessTokenExpiresUtc;
 
-        public YoutubeOAuthClient( Func<ObsAgentConfiguration> configProvider, YoutubeOAuthCredentialStore credentialStore, Action<string> log)
+        public YoutubeOAuthClient( Func<ObsAgentConfiguration> configProvider, YoutubeOAuthCredentialStore credentialStore, Action<string> log )
         {
-            _configProvider = configProvider ?? throw new ArgumentNullException(nameof(configProvider));
-            _credentialStore = credentialStore ?? throw new ArgumentNullException(nameof(credentialStore));
-            _log = log ?? (_ => { });
+            _configProvider = configProvider ?? throw new ArgumentNullException( nameof( configProvider ) );
+            _credentialStore = credentialStore ?? throw new ArgumentNullException( nameof( credentialStore ) );
+            _log = log ?? ( _ => { } );
         }
 
-        public async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken)
+        public async Task<string> GetAccessTokenAsync( CancellationToken cancellationToken )
         {
-            if (!string.IsNullOrWhiteSpace(_accessToken) && DateTime.UtcNow < _accessTokenExpiresUtc.AddMinutes(-1))
+            if( !string.IsNullOrWhiteSpace( _accessToken ) && DateTime.UtcNow < _accessTokenExpiresUtc.AddMinutes( -1 ) )
             {
                 return _accessToken;
             }
 
             ObsAgentConfiguration config = _configProvider().Clone();
-            ValidateConfig(config);
+            ValidateConfig( config );
 
             string refreshToken = _credentialStore.LoadRefreshToken();
 
-            if (!string.IsNullOrWhiteSpace(refreshToken))
+            if( !string.IsNullOrWhiteSpace( refreshToken ) )
             {
-                return await RefreshAsync(config, refreshToken, cancellationToken);
+                return await RefreshAsync( config, refreshToken, cancellationToken );
             }
 
-            return await AuthorizeAsync(config, cancellationToken);
+            return await AuthorizeAsync( config, cancellationToken );
         }
 
-        private async Task<string> AuthorizeAsync( ObsAgentConfiguration config, CancellationToken cancellationToken)
+        private async Task<string> AuthorizeAsync( ObsAgentConfiguration config, CancellationToken cancellationToken )
         {
-            ValidateConfig(config);
-
-            var listener = new TcpListener(IPAddress.Loopback, 0);
+            ValidateConfig( config );
+            cancellationToken.ThrowIfCancellationRequested();
+            var listener = new TcpListener( IPAddress.Loopback, 0 );
             listener.Start();
 
             try
@@ -67,25 +68,35 @@ namespace ObsAgent
                 string redirectUri = $"http://127.0.0.1:{port}/";
 
                 string codeVerifier = CreateCodeVerifier();
-                string codeChallenge = CreateCodeChallenge(codeVerifier);
+                string codeChallenge = CreateCodeChallenge( codeVerifier );
                 string state = CreateState();
 
-                string authorizationUrl = BuildAuthorizationUrl( config.youtubeOAuthClientId, redirectUri, state, codeChallenge);
-                _log("Google / YouTube OAuth 인증을 시작합니다.");
-                OpenBrowser(authorizationUrl);
-                string authorizationCode = await ReceiveAuthorizationCallbackAsync( listener, state, cancellationToken);
-                OAuthTokenResponse token = await ExchangeAuthorizationCodeAsync( config, authorizationCode, redirectUri, codeVerifier, cancellationToken);
+                string authorizationUrl = BuildAuthorizationUrl( config.youtubeOAuthClientId, redirectUri, state, codeChallenge );
 
-                if (!string.IsNullOrWhiteSpace(token.refresh_token))
+                using( var oauthTimeout = CancellationTokenSource.CreateLinkedTokenSource( cancellationToken ) )
                 {
-                    _credentialStore.SaveRefreshToken(token.refresh_token);
+                    oauthTimeout.CancelAfter( TimeSpan.FromSeconds( TimeOutSeconds ) );
+
+                    try
+                    {
+                        _log( "Google / YouTube OAuth 인증을 시작합니다." );
+                        OpenBrowser( authorizationUrl );
+                        string authorizationCode = await ReceiveAuthorizationCallbackAsync( listener, state, oauthTimeout.Token );
+                        OAuthTokenResponse token = await ExchangeAuthorizationCodeAsync( config, authorizationCode, redirectUri, codeVerifier, oauthTimeout.Token );
+
+                        if( !string.IsNullOrWhiteSpace( token.refresh_token ) )
+                        {
+                            _credentialStore.SaveRefreshToken( token.refresh_token );
+                        }
+                        StoreAccessToken( token );
+                        _log( "Google / YouTube OAuth 인증이 완료되었습니다." );
+                        return _accessToken;
+                    }
+                    catch( OperationCanceledException ) when( oauthTimeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested )
+                    {
+                        throw new TimeoutException( "Google / YouTube OAuth 인증 시간이 초과되었습니다. 다시 방송 준비를 실행하세요." );
+                    }
                 }
-
-                StoreAccessToken(token);
-
-                _log("Google / YouTube OAuth 인증이 완료되었습니다.");
-
-                return _accessToken;
             }
             finally
             {
@@ -104,17 +115,17 @@ namespace ObsAgent
             string clientId,
             string redirectUri,
             string state,
-            string codeChallenge)
+            string codeChallenge )
         {
             return AuthorizationEndpoint
-                + "?client_id=" + Uri.EscapeDataString(clientId)
-                + "&redirect_uri=" + Uri.EscapeDataString(redirectUri)
+                + "?client_id=" + Uri.EscapeDataString( clientId )
+                + "&redirect_uri=" + Uri.EscapeDataString( redirectUri )
                 + "&response_type=code"
-                + "&scope=" + Uri.EscapeDataString(YoutubeScope)
+                + "&scope=" + Uri.EscapeDataString( YoutubeScope )
                 + "&access_type=offline"
                 + "&prompt=consent"
-                + "&state=" + Uri.EscapeDataString(state)
-                + "&code_challenge=" + Uri.EscapeDataString(codeChallenge)
+                + "&state=" + Uri.EscapeDataString( state )
+                + "&code_challenge=" + Uri.EscapeDataString( codeChallenge )
                 + "&code_challenge_method=S256";
         }
 
@@ -122,26 +133,26 @@ namespace ObsAgent
         {
             byte[] bytes = new byte[32];
 
-            using (RandomNumberGenerator random = RandomNumberGenerator.Create())
+            using( RandomNumberGenerator random = RandomNumberGenerator.Create() )
             {
-                random.GetBytes(bytes);
+                random.GetBytes( bytes );
             }
 
-            return Base64UrlEncode(bytes);
+            return Base64UrlEncode( bytes );
         }
 
-        private static string CreateCodeChallenge(string codeVerifier)
+        private static string CreateCodeChallenge( string codeVerifier )
         {
-            if (string.IsNullOrWhiteSpace(codeVerifier))
+            if( string.IsNullOrWhiteSpace( codeVerifier ) )
             {
-                throw new ArgumentException( "PKCE Code Verifier가 비어 있습니다.", nameof(codeVerifier));
+                throw new ArgumentException( "PKCE Code Verifier가 비어 있습니다.", nameof( codeVerifier ) );
             }
 
             byte[] source = Encoding.ASCII.GetBytes(codeVerifier);
 
-            using (SHA256 sha256 = SHA256.Create())
+            using( SHA256 sha256 = SHA256.Create() )
             {
-                return Base64UrlEncode( sha256.ComputeHash(source));
+                return Base64UrlEncode( sha256.ComputeHash( source ) );
             }
         }
 
@@ -149,26 +160,26 @@ namespace ObsAgent
         {
             byte[] bytes = new byte[32];
 
-            using (RandomNumberGenerator random = RandomNumberGenerator.Create())
+            using( RandomNumberGenerator random = RandomNumberGenerator.Create() )
             {
-                random.GetBytes(bytes);
+                random.GetBytes( bytes );
             }
 
-            return Base64UrlEncode(bytes);
+            return Base64UrlEncode( bytes );
         }
 
-        private static string Base64UrlEncode(byte[] bytes)
+        private static string Base64UrlEncode( byte[] bytes )
         {
-            return Convert.ToBase64String(bytes)
-                .TrimEnd('=')
-                .Replace('+', '-')
-                .Replace('/', '_');
+            return Convert.ToBase64String( bytes )
+                .TrimEnd( '=' )
+                .Replace( '+', '-' )
+                .Replace( '/', '_' );
         }
 
-        private static async Task<string> ReceiveAuthorizationCallbackAsync( TcpListener listener, string expectedState, CancellationToken cancellationToken)
+        private static async Task<string> ReceiveAuthorizationCallbackAsync( TcpListener listener, string expectedState, CancellationToken cancellationToken )
         {
             TcpClient client = null;
-            using (cancellationToken.Register(() =>
+            using( cancellationToken.Register( () =>
             {
                 try
                 {
@@ -178,24 +189,24 @@ namespace ObsAgent
                 {
                     // 취소 시 Listener 종료 예외는 무시한다.
                 }
-            }))
+            } ) )
             {
                 try
                 {
                     client = await listener.AcceptTcpClientAsync();
                 }
-                catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+                catch( ObjectDisposedException ) when( cancellationToken.IsCancellationRequested )
                 {
-                    throw new OperationCanceledException(cancellationToken);
+                    throw new OperationCanceledException( cancellationToken );
                 }
-                catch (SocketException) when (cancellationToken.IsCancellationRequested)
+                catch( SocketException ) when( cancellationToken.IsCancellationRequested )
                 {
-                    throw new OperationCanceledException(cancellationToken);
+                    throw new OperationCanceledException( cancellationToken );
                 }
             }
 
-            using (client)
-            using (NetworkStream stream = client.GetStream())
+            using( client )
+            using( NetworkStream stream = client.GetStream() )
             {
                 string requestTarget = await ReadRequestTargetAsync(stream);
 
@@ -203,30 +214,30 @@ namespace ObsAgent
 
                 Dictionary<string, string> query = ParseQuery( callbackUri.Query);
 
-                if (query.TryGetValue("error", out string error))
+                if( query.TryGetValue( "error", out string error ) )
                 {
-                    await WriteBrowserResponseAsync( stream, false, "YouTube 인증이 취소되었거나 실패했습니다. OBS Agent를 확인하세요.");
-                    throw new InvalidOperationException( $"Google OAuth 인증 실패: {error}");
+                    await WriteBrowserResponseAsync( stream, false, "YouTube 인증이 취소되었거나 실패했습니다. OBS Agent를 확인하세요." );
+                    throw new InvalidOperationException( $"Google OAuth 인증 실패: {error}" );
                 }
 
-                if (!query.TryGetValue("state", out string returnedState) || !string.Equals(returnedState, expectedState, StringComparison.Ordinal))
+                if( !query.TryGetValue( "state", out string returnedState ) || !string.Equals( returnedState, expectedState, StringComparison.Ordinal ) )
                 {
-                    await WriteBrowserResponseAsync( stream, false, "OAuth 보안 검증에 실패했습니다. OBS Agent를 확인하세요.");
-                    throw new InvalidOperationException( "Google OAuth state 검증에 실패했습니다.");
+                    await WriteBrowserResponseAsync( stream, false, "OAuth 보안 검증에 실패했습니다. OBS Agent를 확인하세요." );
+                    throw new InvalidOperationException( "Google OAuth state 검증에 실패했습니다." );
                 }
 
-                if (!query.TryGetValue("code", out string authorizationCode) || string.IsNullOrWhiteSpace(authorizationCode))
+                if( !query.TryGetValue( "code", out string authorizationCode ) || string.IsNullOrWhiteSpace( authorizationCode ) )
                 {
-                    await WriteBrowserResponseAsync( stream, false, "Authorization Code를 받지 못했습니다. OBS Agent를 확인하세요.");
-                    throw new InvalidOperationException( "Google OAuth Authorization Code가 없습니다.");
+                    await WriteBrowserResponseAsync( stream, false, "Authorization Code를 받지 못했습니다. OBS Agent를 확인하세요." );
+                    throw new InvalidOperationException( "Google OAuth Authorization Code가 없습니다." );
                 }
-                await WriteBrowserResponseAsync( stream, true, "YouTube 인증이 완료되었습니다. 이 창을 닫아도 됩니다.");
+                await WriteBrowserResponseAsync( stream, true, "YouTube 인증이 완료되었습니다. 이 창을 닫아도 됩니다." );
 
                 return authorizationCode;
             }
         }
 
-        private async Task<OAuthTokenResponse> ExchangeAuthorizationCodeAsync( ObsAgentConfiguration config, string authorizationCode, string redirectUri, string codeVerifier, CancellationToken cancellationToken)
+        private async Task<OAuthTokenResponse> ExchangeAuthorizationCodeAsync( ObsAgentConfiguration config, string authorizationCode, string redirectUri, string codeVerifier, CancellationToken cancellationToken )
         {
             var form = new Dictionary<string, string>
             {
@@ -237,21 +248,21 @@ namespace ObsAgent
                 { "grant_type", "authorization_code" }
             };
 
-            using (var content = new FormUrlEncodedContent(form))
-            using (HttpResponseMessage response = await _httpClient.PostAsync(TokenEndpoint, content, cancellationToken))
+            using( var content = new FormUrlEncodedContent( form ) )
+            using( HttpResponseMessage response = await _httpClient.PostAsync( TokenEndpoint, content, cancellationToken ) )
             {
                 string json = await response.Content.ReadAsStringAsync();
 
-                if (!response.IsSuccessStatusCode)
+                if( !response.IsSuccessStatusCode )
                 {
-                    throw new InvalidOperationException( $"OAuth Token 교환 실패. HTTP={(int)response.StatusCode}, Response={json}");
+                    throw new InvalidOperationException( $"OAuth Token 교환 실패. HTTP={( int )response.StatusCode}, Response={json}" );
                 }
 
                 OAuthTokenResponse token = JsonUtility.FromJson<OAuthTokenResponse>(json);
 
-                if (token == null || string.IsNullOrWhiteSpace(token.access_token))
+                if( token == null || string.IsNullOrWhiteSpace( token.access_token ) )
                 {
-                    throw new InvalidOperationException( "Google OAuth Access Token을 받지 못했습니다.");
+                    throw new InvalidOperationException( "Google OAuth Access Token을 받지 못했습니다." );
                 }
 
                 return token;
@@ -267,48 +278,48 @@ namespace ObsAgent
                 { "grant_type", "refresh_token" }
             };
 
-            using (var content = new FormUrlEncodedContent(form))
-            using (HttpResponseMessage response = await _httpClient.PostAsync(TokenEndpoint, content, cancellationToken))
+            using( var content = new FormUrlEncodedContent( form ) )
+            using( HttpResponseMessage response = await _httpClient.PostAsync( TokenEndpoint, content, cancellationToken ) )
             {
                 string json = await response.Content.ReadAsStringAsync();
-                if (!response.IsSuccessStatusCode)
+                if( !response.IsSuccessStatusCode )
                 {
-                    throw new InvalidOperationException( $"OAuth Refresh 실패. HTTP={(int)response.StatusCode}, Response={json}");
+                    throw new InvalidOperationException( $"OAuth Refresh 실패. HTTP={( int )response.StatusCode}, Response={json}" );
                 }
 
                 OAuthTokenResponse token = JsonUtility.FromJson<OAuthTokenResponse>(json);
-                StoreAccessToken(token);
+                StoreAccessToken( token );
                 return _accessToken;
             }
         }
 
-        private void StoreAccessToken(OAuthTokenResponse token)
+        private void StoreAccessToken( OAuthTokenResponse token )
         {
-            if (token == null || string.IsNullOrWhiteSpace(token.access_token))
+            if( token == null || string.IsNullOrWhiteSpace( token.access_token ) )
             {
-                throw new InvalidOperationException( "Access Token이 비어 있습니다.");
+                throw new InvalidOperationException( "Access Token이 비어 있습니다." );
             }
             _accessToken = token.access_token;
             int expiresIn = Mathf.Max( 60, token.expires_in);
-            _accessTokenExpiresUtc = DateTime.UtcNow.AddSeconds(expiresIn);
+            _accessTokenExpiresUtc = DateTime.UtcNow.AddSeconds( expiresIn );
         }
 
-        private static async Task<string> ReadRequestTargetAsync( NetworkStream stream)
+        private static async Task<string> ReadRequestTargetAsync( NetworkStream stream )
         {
-            using (var reader = new StreamReader( stream, Encoding.ASCII, false, 4096, true))
+            using( var reader = new StreamReader( stream, Encoding.ASCII, false, 4096, true ) )
             {
                 string firstLine = await reader.ReadLineAsync();
 
-                if (string.IsNullOrWhiteSpace(firstLine))
+                if( string.IsNullOrWhiteSpace( firstLine ) )
                 {
-                    throw new InvalidOperationException( "OAuth Callback 요청이 비어 있습니다.");
+                    throw new InvalidOperationException( "OAuth Callback 요청이 비어 있습니다." );
                 }
 
                 string[] parts = firstLine.Split(' ');
 
-                if (parts.Length < 2)
+                if( parts.Length < 2 )
                 {
-                    throw new InvalidOperationException( "OAuth Callback 요청이 올바르지 않습니다.");
+                    throw new InvalidOperationException( "OAuth Callback 요청이 올바르지 않습니다." );
                 }
 
                 string line;
@@ -317,13 +328,13 @@ namespace ObsAgent
                 {
                     line = await reader.ReadLineAsync();
                 }
-                while (line != null && line.Length > 0);
+                while( line != null && line.Length > 0 );
 
                 return parts[1];
             }
         }
 
-        private static async Task WriteBrowserResponseAsync( NetworkStream stream, bool success, string message)
+        private static async Task WriteBrowserResponseAsync( NetworkStream stream, bool success, string message )
         {
             string title = success ? "YouTube 인증 완료" : "YouTube 인증 실패";
 
@@ -348,19 +359,19 @@ namespace ObsAgent
 
             byte[] headerBytes = Encoding.ASCII.GetBytes(headers);
 
-            await stream.WriteAsync( headerBytes, 0, headerBytes.Length);
+            await stream.WriteAsync( headerBytes, 0, headerBytes.Length );
 
-            await stream.WriteAsync( bodyBytes, 0, bodyBytes.Length);
+            await stream.WriteAsync( bodyBytes, 0, bodyBytes.Length );
         }
 
-        private static void OpenBrowser(string url)
+        private static void OpenBrowser( string url )
         {
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
-            Process.Start(new ProcessStartInfo
+            Process.Start( new ProcessStartInfo
             {
                 FileName = url,
                 UseShellExecute = true
-            });
+            } );
 #elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
             Process.Start( new ProcessStartInfo
             {
@@ -373,15 +384,15 @@ namespace ObsAgent
 #endif
         }
 
-        private static Dictionary<string, string> ParseQuery( string query)
+        private static Dictionary<string, string> ParseQuery( string query )
         {
             var result = new Dictionary<string, string>( StringComparer.Ordinal);
 
             string source = query?.TrimStart('?') ?? string.Empty;
 
-            foreach (string pair in source.Split('&'))
+            foreach( string pair in source.Split( '&' ) )
             {
-                if (string.IsNullOrWhiteSpace(pair))
+                if( string.IsNullOrWhiteSpace( pair ) )
                 {
                     continue;
                 }
@@ -391,19 +402,19 @@ namespace ObsAgent
                 string key = separator >= 0 ? pair.Substring(0, separator) : pair;
                 string value = separator >= 0 ? pair.Substring(separator + 1) : string.Empty;
 
-                result[Uri.UnescapeDataString(key)] = Uri.UnescapeDataString(value);
+                result[Uri.UnescapeDataString( key )] = Uri.UnescapeDataString( value );
             }
             return result;
         }
 
-        private static void ValidateConfig( ObsAgentConfiguration config)
+        private static void ValidateConfig( ObsAgentConfiguration config )
         {
-            if (config == null)
+            if( config == null )
             {
-                throw new ArgumentNullException( nameof(config) );
+                throw new ArgumentNullException( nameof( config ) );
             }
 
-            if (string.IsNullOrWhiteSpace( config.youtubeOAuthClientId) )
+            if( string.IsNullOrWhiteSpace( config.youtubeOAuthClientId ) )
             {
                 throw new InvalidOperationException( "YouTube OAuth Client ID가 없습니다." );
             }
