@@ -82,6 +82,7 @@ namespace ObsAgent
         {
             Application.runInBackground = true;
             Application.targetFrameRate = 15;
+            string persistentDataPath = Application.persistentDataPath;
 
             if( ValidateUiReferences() == false )
             {
@@ -100,7 +101,7 @@ namespace ObsAgent
             ApplyConfigurationToUi( _currentConfig );
             _operations = new ObsAgentOperations( GetConfigSnapshot, EnqueueLog );
             _videoSessionStore = new ObsVideoSessionStore();
-            _youtubeLiveCoordinator = new YoutubeLiveCoordinator( GetConfigSnapshot, _operations, EnqueueLog );
+            _youtubeLiveCoordinator = new YoutubeLiveCoordinator( GetConfigSnapshot, _operations, persistentDataPath, EnqueueLog );
             _httpServer = new ObsAgentHttpServer( GetConfigSnapshot, _operations, _videoSessionStore, _youtubeLiveCoordinator, EnqueueLog );
             RegisterButtonEvents();
             EnqueueLog( $"{CurrentPlatformName}용 OBS Agent를 초기화했습니다." );

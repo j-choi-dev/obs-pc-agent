@@ -123,11 +123,16 @@ namespace ObsAgent
         public string sceneName;
     }
 
-    public static class ObsAgentConfigStore
+    public class ObsAgentConfigStore
     {
         private const string FileName = "obs-agent-config.json";
 
-        public static string ConfigPath => Path.Combine( Application.persistentDataPath, FileName );
+        public static string ConfigPath { get; private set; }
+
+        public ObsAgentConfigStore()
+        {
+            ConfigPath = Path.Combine( Application.persistentDataPath, FileName );
+        }
 
         public static ObsAgentConfiguration Clear()
         {

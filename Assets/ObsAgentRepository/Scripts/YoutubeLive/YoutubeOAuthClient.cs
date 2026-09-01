@@ -46,7 +46,6 @@ namespace ObsAgent
             ValidateConfig( config );
 
             string refreshToken = _credentialStore.LoadRefreshToken();
-
             if( !string.IsNullOrWhiteSpace( refreshToken ) )
             {
                 return await RefreshAsync( config, refreshToken, cancellationToken );

@@ -14,7 +14,22 @@ namespace ObsAgent
             public string refreshToken;
         }
 
-        private static string FilePath => Path.Combine( Application.persistentDataPath, FileName );
+        public string FilePath { get; private set; }
+
+        public YoutubeOAuthCredentialStore(string persistentDataPath )
+        {
+            if( string.IsNullOrWhiteSpace( persistentDataPath ) )
+            {
+                throw new ArgumentException( "Persistent Data Path가 비어 있습니다.", nameof( persistentDataPath ) );
+            }
+            FilePath = Path.Combine( persistentDataPath, FileName );
+            string directory = Path.GetDirectoryName( FilePath );
+
+            if( !string.IsNullOrWhiteSpace( directory ) )
+            {
+                Directory.CreateDirectory( directory );
+            }
+        }
 
         public string LoadRefreshToken()
         {

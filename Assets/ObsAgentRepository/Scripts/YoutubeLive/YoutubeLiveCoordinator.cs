@@ -15,6 +15,8 @@ namespace ObsAgent
         private readonly YoutubeOAuthClient _oauthClient;
 
         private readonly YoutubeLiveApiClient _youtubeApi;
+
+        private YoutubeOAuthCredentialStore _credentialStore;
         private readonly Action<string> _log;
         private readonly CancellationTokenSource _lifetimeCancellation = new CancellationTokenSource();
         private YoutubeLiveState _state = YoutubeLiveState.IDLE;
@@ -23,14 +25,14 @@ namespace ObsAgent
 
         private YoutubePreparedSession _prepared;
 
-        public YoutubeLiveCoordinator( Func<ObsAgentConfiguration> configProvider, ObsAgentOperations operations, Action<string> log )
+        public YoutubeLiveCoordinator( Func<ObsAgentConfiguration> configProvider, ObsAgentOperations operations, string persistantPath, Action<string> log )
         {
             _configProvider = configProvider;
             _operations = operations;
             _log = log ?? ( _ => { } );
 
-            var credentialStore = new YoutubeOAuthCredentialStore();
-            _oauthClient = new YoutubeOAuthClient( _configProvider, credentialStore, _log );
+            _credentialStore  = new YoutubeOAuthCredentialStore( persistantPath );
+            _oauthClient = new YoutubeOAuthClient( _configProvider, _credentialStore, _log );
             _youtubeApi = new YoutubeLiveApiClient( _oauthClient );
         }
 
