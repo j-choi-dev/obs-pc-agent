@@ -645,24 +645,27 @@ namespace ObsAgent
                 encryptedText = encryptedText.Trim();
 
                 string decryptedJson = _cryptoProcessor.ConvertDecryptedString( encryptedText, cryptoKey );
-
                 if( string.IsNullOrWhiteSpace( decryptedJson ) )
                 {
                     throw new InvalidOperationException( "Auth.bin 복호화 결과가 비어 있습니다." );
                 }
 
                 ObsAgentAuthData authData = ParseAuthData( decryptedJson );
-
                 if( authData == null )
                 {
                     throw new InvalidOperationException( "Auth.bin의 JSON 데이터를 해석하지 못했습니다." );
                 }
 
                 string youtubeClientId = authData?.client_id?.Trim() ?? string.Empty;
-
                 if( string.IsNullOrWhiteSpace( youtubeClientId ) )
                 {
                     throw new InvalidOperationException( "Auth.bin에 YouTube OAuth Client ID가 없습니다." );
+                }
+
+                string youtubeClientSecret = authData?.client_secret?.Trim() ?? string.Empty;
+                if( string.IsNullOrWhiteSpace( youtubeClientSecret ) )
+                {
+                    throw new InvalidOperationException( "Auth.bin에 YouTube OAuth Client Secret이 없습니다." );
                 }
 
                 // 기본적인 Client ID 오입력 방지.
@@ -683,12 +686,11 @@ namespace ObsAgent
                     }
 
                     _currentConfig.youtubeOAuthClientId = youtubeClientId;
+                    _currentConfig.youtubeOAuthClientSecret = youtubeClientSecret;
                 }
-
                 // Store에도 반영
                 ObsAgentConfigStore.Save( GetConfigSnapshot() );
-
-                EnqueueLog( "YouTube OAuth Client ID를 Auth.bin에서 불러왔습니다." );
+                EnqueueLog( "YouTube OAuth Client ID와 Client Secret을 Auth.bin에서 불러왔습니다." );
 
                 return true;
             }

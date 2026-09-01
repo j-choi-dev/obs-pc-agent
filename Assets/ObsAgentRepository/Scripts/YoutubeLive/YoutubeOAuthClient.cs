@@ -242,6 +242,7 @@ namespace ObsAgent
             var form = new Dictionary<string, string>
             {
                 { "client_id", config.youtubeOAuthClientId },
+                { "client_secret", config.youtubeOAuthClientSecret },
                 { "code", authorizationCode },
                 { "code_verifier", codeVerifier },
                 { "redirect_uri", redirectUri },
@@ -274,6 +275,7 @@ namespace ObsAgent
             var form = new Dictionary<string, string>
             {
                 { "client_id", config.youtubeOAuthClientId },
+                { "client_secret", config.youtubeOAuthClientSecret },
                 { "refresh_token", refreshToken },
                 { "grant_type", "refresh_token" }
             };
@@ -417,6 +419,11 @@ namespace ObsAgent
             if( string.IsNullOrWhiteSpace( config.youtubeOAuthClientId ) )
             {
                 throw new InvalidOperationException( "YouTube OAuth Client ID가 없습니다." );
+            }
+
+            if( string.IsNullOrWhiteSpace( config.youtubeOAuthClientSecret ) )
+            {
+                throw new InvalidOperationException( "YouTube OAuth Client Secret이 없습니다." );
             }
         }
 
