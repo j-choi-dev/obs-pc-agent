@@ -174,6 +174,20 @@ namespace ObsAgent
                 }
             }
 
+            if (response.status === 401)
+            {
+                setStatus(
+                    'Agent Token 변경 감지\nReceiver를 새로고침합니다.',
+                    false);
+
+                await sleep(300);
+
+                window.location.reload();
+
+                throw new Error(
+                    'Agent Token이 변경되어 Receiver를 새로고침합니다.');
+            }
+
             if (!response.ok)
             {
                 let detail = response.statusText;
