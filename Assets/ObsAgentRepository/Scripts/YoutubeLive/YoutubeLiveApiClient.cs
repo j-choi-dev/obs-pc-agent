@@ -73,7 +73,7 @@ namespace ObsAgent
             var request = new CreateBroadcastRequest
                 {
                     snippet = new BroadcastSnippet { title = title, scheduledStartTime = DateTime.UtcNow.AddMinutes( 1 ).ToString( "O" ) },
-                    status = new BroadcastStatus { privacyStatus = privacyStatus },
+                    status = new BroadcastInsertStatus { privacyStatus = privacyStatus },
                     contentDetails = new BroadcastContentDetails
                         {
                             enableAutoStart = false,
@@ -85,6 +85,7 @@ namespace ObsAgent
                 };
 
             string json = JsonUtility.ToJson( request );
+            Debug.Log( $"YouTube Broadcast Insert Request: {json}" );
             string responseJson = await SendJsonAsync( HttpMethod.Post, ApiBase + "liveBroadcasts" + "?part=snippet,status,contentDetails", json, cancellationToken );
             BroadcastResponse response = JsonUtility.FromJson<BroadcastResponse>( responseJson );
             if( response == null || string.IsNullOrWhiteSpace( response.id ) )
@@ -218,9 +219,8 @@ namespace ObsAgent
         private sealed class CreateBroadcastRequest
         {
             public BroadcastSnippet snippet;
-            public BroadcastStatus status;
-            public BroadcastContentDetails
-                contentDetails;
+            public BroadcastInsertStatus status;
+            public BroadcastContentDetails contentDetails;
         }
 
         [Serializable]
@@ -232,6 +232,19 @@ namespace ObsAgent
 
         [Serializable]
         private sealed class BroadcastStatus
+        {
+            public string privacyStatus;
+            public string lifeCycleStatus;
+        }
+
+        [Serializable]
+        private sealed class BroadcastInsertStatus
+        {
+            public string privacyStatus;
+        }
+
+        [Serializable]
+        private sealed class BroadcastResponseStatus
         {
             public string privacyStatus;
             public string lifeCycleStatus;
@@ -259,7 +272,7 @@ namespace ObsAgent
         private sealed class BroadcastResponse
         {
             public string id;
-            public BroadcastStatus status;
+            public BroadcastResponseStatus status;
         }
 
         [Serializable]
