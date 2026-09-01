@@ -50,6 +50,10 @@ namespace ObsAgent
         [SerializeField] private Button tokenRegenButton;
         [SerializeField] private Button copyButtonButton;
 
+        [Header("OBS Setting Input Fields")]
+        [SerializeField] private TMP_InputField obsSceneNameInput;
+        [SerializeField] private TMP_InputField obsSourceNameInput;
+
         [Header("Required Status")]
         [SerializeField] private TMP_Text statusText;
 
@@ -288,7 +292,7 @@ namespace ObsAgent
         /// <summary>
         /// 기존 설정을 Compact Agent에 맞는 고정 설정으로 변환한다.
         /// </summary>
-        private static ObsAgentConfiguration CreateCompactConfiguration( ObsAgentConfiguration loaded )
+        private ObsAgentConfiguration CreateCompactConfiguration( ObsAgentConfiguration loaded )
         {
             loaded ??= new ObsAgentConfiguration();
             return new ObsAgentConfiguration
@@ -316,11 +320,11 @@ namespace ObsAgent
                 youtubeOAuthClientSecret = loaded.youtubeOAuthClientSecret ?? string.Empty,
 
                 youtubeObsSceneName = string.IsNullOrWhiteSpace( loaded.youtubeObsSceneName )
-                    ? "YouTubeLive"
+                    ? obsSceneNameInput.text
                     : loaded.youtubeObsSceneName,
 
                 youtubeObsSourceName = string.IsNullOrWhiteSpace( loaded.youtubeObsSourceName )
-                    ? "OBS Receiver"
+                    ? obsSourceNameInput.text
                     : loaded.youtubeObsSourceName,
 
                 youtubePrivacyStatus = string.IsNullOrWhiteSpace( loaded.youtubePrivacyStatus )
@@ -357,19 +361,24 @@ namespace ObsAgent
                 listenPort = AgentPort,
                 allowLanClients = true,
                 autoStartServer = true,
+
                 agentToken = agentToken,
                 obsExecutablePath = obsPath,
                 obsWebSocketPort = ObsWebSocketPort,
                 obsWebSocketPassword = obsWebSocketPasswordInput.text,
+
                 profileName = string.Empty,
                 sceneCollectionName = string.Empty,
                 defaultSceneName = string.Empty,
+
                 minimizeToTray = DefaultMinimizeToTray,
                 setSceneAfterLaunch = false,
                 startRecordingAfterLaunch = false,
                 startStreamingAfterLaunch = false,
+
                 youtubeOAuthClientId = previous.youtubeOAuthClientId ?? string.Empty,
                 youtubeOAuthClientSecret = previous.youtubeOAuthClientSecret ?? string.Empty,
+
                 youtubeObsSceneName = string.IsNullOrWhiteSpace( previous.youtubeObsSceneName ) ? "YouTubeLive" : previous.youtubeObsSceneName,
                 youtubeObsSourceName = string.IsNullOrWhiteSpace( previous.youtubeObsSourceName ) ? "OBS Receiver" : previous.youtubeObsSourceName,
                 youtubePrivacyStatus = string.IsNullOrWhiteSpace( previous.youtubePrivacyStatus ) ? "unlisted" : previous.youtubePrivacyStatus
