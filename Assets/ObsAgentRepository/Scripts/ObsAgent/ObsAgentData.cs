@@ -24,6 +24,7 @@ namespace ObsAgent
         [Header("OBS WebSocket")]
         public int obsWebSocketPort = 4455;
         public string obsWebSocketPassword = string.Empty;
+        public string streamKey = string.Empty;
 
         [Header("After New OBS Launch")]
         public bool setSceneAfterLaunch = true;
@@ -56,6 +57,7 @@ namespace ObsAgent
 
                 obsWebSocketPort = obsWebSocketPort,
                 obsWebSocketPassword = obsWebSocketPassword,
+                streamKey = streamKey,
 
                 setSceneAfterLaunch = setSceneAfterLaunch,
                 startRecordingAfterLaunch = startRecordingAfterLaunch,

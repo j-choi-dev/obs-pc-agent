@@ -156,6 +156,7 @@ namespace ObsAgent
             testObsButton.onClick.AddListener( TestObsConnection );
             tokenRegenButton.onClick.AddListener( RegenerateAgentToken );
             copyButtonButton.onClick.AddListener( CopyConnectionInfo );
+            testStreamKeyButton.onClick.AddListener( TestYoutubeStreamKey );
         }
 
         /// <summary>
@@ -220,6 +221,7 @@ namespace ObsAgent
                 EnqueueLog( $"Agent Token 재생성 실패: {exception.Message}" );
             }
         }
+
         private void CopyConnectionInfo()
         {
             try
@@ -245,15 +247,49 @@ namespace ObsAgent
                     throw new InvalidOperationException( "Agent Token이 없습니다." );
                 }
 
-                string copyText =            $"Endpoint: {endpoint}\nAgent Token: {token}";
-
-                GUIUtility.systemCopyBuffer =                    copyText;
-
+                // string copyText = $"Endpoint: {endpoint}\nAgent Token: {token}";
+                string streamKey = streamKeyInput != null ? streamKeyInput.text.Trim() : string.Empty;
+                string copyText = $"Endpoint: {endpoint}\nAgentToken: {token}\nStreamKey: {streamKey}";
+                GUIUtility.systemCopyBuffer = copyText;
                 EnqueueLog( "Endpoint와 Agent Token을 클립보드에 복사했습니다." );
             }
             catch( Exception exception )
             {
                 EnqueueLog( $"연결 정보 복사 실패: {exception.Message}" );
+            }
+        }
+
+        private async void TestYoutubeStreamKey()
+        {
+            if( _isCommandRunning || _isShuttingDown )
+            {
+                return;
+            }
+            _isCommandRunning = true;
+            SetButtonsInteractable( false );
+
+            try
+            {
+                await _youtubeLiveCoordinator.TestStreamKeyAsync( streamKeyInput.text, _lifetimeCancellation.Token );
+                EnqueueLog( "입력한 Stream Key가 인증한 YouTube 채널의 Stream Key와 일치합니다." );
+            }
+            catch( OperationCanceledException )
+            {
+                EnqueueLog( "Stream Key 확인이 취소되었습니다." );
+            }
+            catch( Exception exception )
+            {
+                EnqueueLog( $"Stream Key 확인 실패: {exception.Message}" );
+            }
+            finally
+            {
+                _isCommandRunning = false;
+
+                if( !_isShuttingDown )
+                {
+                    SetButtonsInteractable( true );
+                    RefreshStatusText();
+                }
             }
         }
 
@@ -304,6 +340,7 @@ namespace ObsAgent
                 autoStartServer = true,
 
                 agentToken = loaded.agentToken ?? string.Empty,
+                streamKey = loaded.streamKey ?? string.Empty,
                 obsExecutablePath = string.IsNullOrWhiteSpace( loaded.obsExecutablePath ) ? GetDefaultObsPath() : NormalizeObsPath( loaded.obsExecutablePath ),
                 obsWebSocketPort = ObsWebSocketPort,
                 obsWebSocketPassword = loaded.obsWebSocketPassword ?? string.Empty,
@@ -339,6 +376,7 @@ namespace ObsAgent
         {
             obsExecutablePathInput.SetTextWithoutNotify( config.obsExecutablePath );
             obsWebSocketPasswordInput.SetTextWithoutNotify( config.obsWebSocketPassword );
+            streamKeyInput.SetTextWithoutNotify( config.streamKey ?? string.Empty );
             agentTokenInput.SetTextWithoutNotify( config.agentToken );
             obsSceneNameInput.SetTextWithoutNotify( config.youtubeObsSceneName );
             obsSourceNameInput.SetTextWithoutNotify( config.youtubeObsSourceName );
@@ -381,6 +419,7 @@ namespace ObsAgent
                 obsExecutablePath = obsPath,
                 obsWebSocketPort = ObsWebSocketPort,
                 obsWebSocketPassword = obsWebSocketPasswordInput.text,
+                streamKey = streamKeyInput.text ?? string.Empty,
 
                 profileName = string.Empty,
                 sceneCollectionName = string.Empty,
@@ -520,6 +559,7 @@ namespace ObsAgent
             launchObsButton.interactable = interactable;
             testObsButton.interactable = interactable;
             tokenRegenButton.interactable = interactable;
+            testStreamKeyButton.interactable = interactable;
             copyButtonButton.interactable = true;
         }
 
@@ -529,6 +569,8 @@ namespace ObsAgent
                 obsExecutablePathInput != null &&
                 obsWebSocketPasswordInput != null &&
                 agentTokenInput != null &&
+                streamKeyInput != null &&
+                testStreamKeyButton != null &&
                 obsSceneNameInput != null &&
                 obsSourceNameInput != null &&
                 applyAndStartButton != null &&
@@ -634,8 +676,8 @@ namespace ObsAgent
 #endif
             }
         }
-        private async UniTask<bool>
-    LoadAuthConfigurationAsync()
+
+        private async UniTask<bool> LoadAuthConfigurationAsync()
         {
             try
             {

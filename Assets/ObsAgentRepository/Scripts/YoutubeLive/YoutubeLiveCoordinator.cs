@@ -36,6 +36,15 @@ namespace ObsAgent
             _youtubeApi = new YoutubeLiveApiClient( _oauthClient );
         }
 
+        public async Task TestStreamKeyAsync( string streamKey, CancellationToken cancellationToken )
+        {
+            if( string.IsNullOrWhiteSpace( streamKey ) )
+            {
+                throw new InvalidOperationException( "YouTube Stream Key를 입력하세요." );
+            }
+            await _youtubeApi.FindStreamByKeyAsync( streamKey.Trim(), cancellationToken );
+        }
+
         public YoutubeLiveStatusResponse GetStatus()
         {
             lock( _stateGate )
