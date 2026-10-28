@@ -42,11 +42,13 @@ namespace ObsAgent
         [SerializeField] private TMP_InputField obsExecutablePathInput;
         [SerializeField] private TMP_InputField obsWebSocketPasswordInput;
         [SerializeField] private TMP_InputField agentTokenInput;
+        [SerializeField] private TMP_InputField streamKeyInput;
 
         [Header("Required Buttons")]
         [SerializeField] private Button applyAndStartButton;
         [SerializeField] private Button launchObsButton;
         [SerializeField] private Button testObsButton;
+        [SerializeField] private Button testStreamKeyButton;
         [SerializeField] private Button tokenRegenButton;
         [SerializeField] private Button copyButtonButton;
 
