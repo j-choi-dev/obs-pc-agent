@@ -518,9 +518,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "Agent: RUNNING\nOBS: STOPPED\nEndpoint: http://10.224.202.119:7443\nOBS
-    WebSocket: 127.0.0.1:4455\nStatus: [09:02:57] OBS\uB97C \uC2E4\uD589\uD558\uACE0
-    \uCD08\uAE30 \uC124\uC815\uC744 \uC801\uC6A9\uD588\uC2B5\uB2C8\uB2E4."
+  m_text: 
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 29c5628fb553ca448be5ce4706192491, type: 2}
   m_sharedMaterial: {fileID: 5259784579271871459, guid: 29c5628fb553ca448be5ce4706192491, type: 2}
